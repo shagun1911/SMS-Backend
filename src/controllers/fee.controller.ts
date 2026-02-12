@@ -79,6 +79,36 @@ class FeeController {
             next(error);
         }
     }
+
+    // POST Collect fee (quick collect: find/create fee record and record payment)
+    async collectFee(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { studentId, amount, month, feeTitle, mode, transactionId, remarks } = req.body;
+            const result = await FeeService.collectFee(req.schoolId!, {
+                studentId,
+                amount: Number(amount),
+                month,
+                feeTitle,
+                mode: mode || 'cash',
+                transactionId,
+                remarks,
+                staffId: req.user!._id.toString(),
+            });
+            sendResponse(res, result, 'Fee collected successfully', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    // GET Fee stats (summary for dashboard)
+    async getFeeStats(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const stats = await FeeService.getFeeStats(req.schoolId!);
+            sendResponse(res, stats, 'Fee stats retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new FeeController();

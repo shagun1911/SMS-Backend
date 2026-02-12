@@ -1,10 +1,56 @@
-import { ISalaryRecord, SalaryStatus, UserRole, PaymentMode } from '../types';
+import { ISalaryRecord, SalaryStatus, UserRole, PaymentMode, ISalaryStructure, IOtherPayment } from '../types';
 import SalaryRepository from '../repositories/salary.repository';
 import UserRepository from '../repositories/user.repository';
+import SalaryStructureRepository from '../repositories/salaryStructure.repository';
+import OtherPaymentRepository from '../repositories/otherPayment.repository';
 import ErrorResponse from '../utils/errorResponse';
 import { Types } from 'mongoose';
 
 class SalaryService {
+    /**
+     * Get active salary structure for a staff member
+     */
+    async getSalaryStructure(
+        schoolId: string,
+        staffId: string
+    ): Promise<ISalaryStructure | null> {
+        return await SalaryStructureRepository.findActiveByStaff(schoolId, staffId);
+    }
+
+    /**
+     * Create or update salary structure for a staff member
+     */
+    async upsertSalaryStructure(
+        schoolId: string,
+        staffId: string,
+        payload: {
+            baseSalary: number;
+            allowances?: { title: string; amount: number }[];
+            deductions?: { title: string; amount: number }[];
+            effectiveFrom?: Date;
+        }
+    ): Promise<ISalaryStructure> {
+        const existing = await SalaryStructureRepository.findActiveByStaff(schoolId, staffId);
+
+        const data = {
+            schoolId: new Types.ObjectId(schoolId) as any,
+            staffId: new Types.ObjectId(staffId) as any,
+            baseSalary: payload.baseSalary,
+            allowances: payload.allowances || [],
+            deductions: payload.deductions || [],
+            effectiveFrom: payload.effectiveFrom,
+            isActive: true,
+        };
+
+        if (!existing) {
+            return await SalaryStructureRepository.create(data as any);
+        }
+
+        // For now, update in-place; if you later want history, you can deactivate old and create new.
+        const updated = await SalaryStructureRepository.update(existing._id.toString(), data as any);
+        return updated || (await SalaryStructureRepository.findById(existing._id.toString()))!;
+    }
+
     /**
      * Generate Monthly Salaries for All Staff
      */
@@ -39,7 +85,41 @@ class SalaryService {
                 continue;
             }
 
-            const basicSalary = user.baseSalary || 0;
+            // Prefer explicit salary structure; fall back to user's baseSalary
+            const structure = await SalaryStructureRepository.findActiveByStaff(
+                schoolId,
+                user._id.toString()
+            );
+
+            const basicSalary = structure?.baseSalary ?? user.baseSalary ?? 0;
+            const allowances = structure?.allowances || [];
+            const deductions = structure?.deductions || [];
+
+            // Include other payments for this month (bonuses/adjustments)
+            const monthStart = new Date(year, new Date(`${month} 1, ${year}`).getMonth(), 1);
+            const monthEnd = new Date(monthStart);
+            monthEnd.setMonth(monthEnd.getMonth() + 1);
+            monthEnd.setDate(monthEnd.getDate() - 1);
+
+            const otherPayments = await OtherPaymentRepository.findByStaffAndDateRange(
+                schoolId,
+                user._id.toString(),
+                monthStart,
+                monthEnd
+            );
+
+            const bonusTotal = otherPayments
+                .filter((p) => p.type === 'bonus')
+                .reduce((sum, p) => sum + p.amount, 0);
+            const adjustmentTotal = otherPayments
+                .filter((p) => p.type === 'adjustment')
+                .reduce((sum, p) => sum + p.amount, 0);
+
+            const allowanceTotal = allowances.reduce((acc, curr) => acc + curr.amount, 0) + bonusTotal;
+            const deductionTotal = deductions.reduce((acc, curr) => acc + curr.amount, 0) + adjustmentTotal;
+
+            const totalSalary = basicSalary + allowanceTotal;
+            const netSalary = totalSalary - deductionTotal;
 
             await SalaryRepository.create({
                 schoolId: new Types.ObjectId(schoolId) as any,
@@ -47,12 +127,12 @@ class SalaryService {
                 month,
                 year,
                 basicSalary,
-                allowances: [],
-                deductions: [],
-                totalSalary: basicSalary,
-                netSalary: basicSalary,
+                allowances,
+                deductions,
+                totalSalary,
+                netSalary,
                 status: SalaryStatus.PENDING
-            });
+            } as any);
             createdCount++;
         }
 
@@ -128,13 +208,138 @@ class SalaryService {
     }
 
     /**
-     * Get Salary History for a specific staff member
+     * List salary payments (history) for a staff member, optionally filtered by year
+     */
+    async listSalaryPayments(
+        schoolId: string,
+        staffId: string,
+        options?: { year?: number }
+    ): Promise<ISalaryRecord[]> {
+        const filter: any = { schoolId, staffId };
+        if (options?.year != null) filter.year = options.year;
+        return await SalaryRepository.find(filter, { sort: { year: -1, month: -1 } });
+    }
+
+    /**
+     * Get Salary History for a specific staff member (alias for listSalaryPayments)
      */
     async getStaffSalaryHistory(schoolId: string, staffId: string): Promise<ISalaryRecord[]> {
-        return await SalaryRepository.find({
+        return await this.listSalaryPayments(schoolId, staffId);
+    }
+
+    /**
+     * Helper to generate or refresh a single staff/month salary from structure + other payments.
+     */
+    async createOrUpdateMonthlyPaymentFromStructure(
+        schoolId: string,
+        staffId: string,
+        month: string,
+        year: number
+    ): Promise<ISalaryRecord> {
+        const [existingRecord, structure] = await Promise.all([
+            SalaryRepository.findOne({ schoolId, staffId, month, year }),
+            SalaryStructureRepository.findActiveByStaff(schoolId, staffId),
+        ]);
+
+        const staff = await UserRepository.findById(staffId);
+        if (!staff || staff.schoolId?.toString() !== schoolId) {
+            throw new ErrorResponse('Staff member not found', 404);
+        }
+
+        const basicSalary = structure?.baseSalary ?? staff.baseSalary ?? 0;
+        const baseAllowances = structure?.allowances || [];
+        const baseDeductions = structure?.deductions || [];
+
+        const monthStart = new Date(year, new Date(`${month} 1, ${year}`).getMonth(), 1);
+        const monthEnd = new Date(monthStart);
+        monthEnd.setMonth(monthEnd.getMonth() + 1);
+        monthEnd.setDate(monthEnd.getDate() - 1);
+
+        const otherPayments = await OtherPaymentRepository.findByStaffAndDateRange(
             schoolId,
-            staffId
-        }, { sort: { year: -1, month: -1 } });
+            staffId,
+            monthStart,
+            monthEnd
+        );
+
+        const bonusTotal = otherPayments
+            .filter((p) => p.type === 'bonus')
+            .reduce((sum, p) => sum + p.amount, 0);
+        const adjustmentTotal = otherPayments
+            .filter((p) => p.type === 'adjustment')
+            .reduce((sum, p) => sum + p.amount, 0);
+
+        const allowances = [...baseAllowances];
+        if (bonusTotal > 0) {
+            allowances.push({ title: 'Bonuses & incentives', amount: bonusTotal });
+        }
+
+        const deductions = [...baseDeductions];
+        if (adjustmentTotal > 0) {
+            deductions.push({ title: 'Adjustments', amount: adjustmentTotal });
+        }
+
+        const allowanceTotal = allowances.reduce((acc, curr) => acc + curr.amount, 0);
+        const deductionTotal = deductions.reduce((acc, curr) => acc + curr.amount, 0);
+
+        const totalSalary = basicSalary + allowanceTotal;
+        const netSalary = totalSalary - deductionTotal;
+
+        if (!existingRecord) {
+            return await SalaryRepository.create({
+                schoolId: new Types.ObjectId(schoolId) as any,
+                staffId: new Types.ObjectId(staffId) as any,
+                month,
+                year,
+                basicSalary,
+                allowances,
+                deductions,
+                totalSalary,
+                netSalary,
+                status: SalaryStatus.PENDING
+            } as any);
+        }
+
+        existingRecord.basicSalary = basicSalary;
+        existingRecord.allowances = allowances;
+        existingRecord.deductions = deductions;
+        existingRecord.totalSalary = totalSalary;
+        existingRecord.netSalary = netSalary;
+
+        await existingRecord.save();
+        return existingRecord;
+    }
+
+    /**
+     * List other payments (bonuses/adjustments) for a staff member
+     */
+    async listOtherPayments(schoolId: string, staffId: string): Promise<IOtherPayment[]> {
+        return await OtherPaymentRepository.listByStaff(schoolId, staffId);
+    }
+
+    /**
+     * Create a one-time other payment (bonus or adjustment) for a staff member
+     */
+    async createOtherPayment(
+        schoolId: string,
+        staffId: string,
+        payload: {
+            title: string;
+            amount: number;
+            type: 'bonus' | 'adjustment';
+            date: Date;
+            notes?: string;
+        }
+    ): Promise<IOtherPayment> {
+        return await OtherPaymentRepository.create({
+            schoolId: new Types.ObjectId(schoolId) as any,
+            staffId: new Types.ObjectId(staffId) as any,
+            title: payload.title,
+            amount: payload.amount,
+            type: payload.type,
+            date: payload.date,
+            notes: payload.notes,
+        } as any);
     }
 
     /**

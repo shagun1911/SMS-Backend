@@ -314,6 +314,38 @@ export interface ISalaryRecord extends Document {
     updatedAt: Date;
 }
 
+export interface ISalaryStructure extends Document {
+    _id: Types.ObjectId;
+    schoolId: Types.ObjectId;
+    staffId: Types.ObjectId;
+    baseSalary: number;
+    allowances: {
+        title: string;
+        amount: number;
+    }[];
+    deductions: {
+        title: string;
+        amount: number;
+    }[];
+    effectiveFrom?: Date;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface IOtherPayment extends Document {
+    _id: Types.ObjectId;
+    schoolId: Types.ObjectId;
+    staffId: Types.ObjectId;
+    title: string;
+    amount: number;
+    type: 'bonus' | 'adjustment';
+    date: Date;
+    notes?: string;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 // ============================================
 // AUDIT LOG TYPES
 // ============================================

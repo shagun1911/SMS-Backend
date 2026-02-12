@@ -10,16 +10,18 @@ class UserController {
     async getUsers(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const schoolId = req.schoolId;
-
+            if (!schoolId) {
+                return res.status(200).json({ success: true, count: 0, data: [] });
+            }
             const users = await User.find({ schoolId }).sort({ role: 1, name: 1 });
 
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 count: users.length,
                 data: users
             });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
 
@@ -39,12 +41,12 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to access this user`, 401));
             }
 
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: user
             });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
 
@@ -63,12 +65,12 @@ class UserController {
 
             const user = await User.create(req.body);
 
-            res.status(201).json({
+            return res.status(201).json({
                 success: true,
                 data: user
             });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
 
@@ -93,12 +95,12 @@ class UserController {
                 runValidators: true
             });
 
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: user
             });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
 
@@ -120,12 +122,12 @@ class UserController {
 
             await User.findByIdAndDelete(req.params.id);
 
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: {}
             });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
 }

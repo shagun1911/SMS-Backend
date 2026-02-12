@@ -7,7 +7,14 @@ const router = Router();
 
 router.use(protect, multitenant);
 
-router.get('/', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER, UserRole.SUPER_ADMIN), ExamController.getExams);
-router.post('/', authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN), ExamController.createExam);
+router.get('/', ExamController.getExams);
+router.post('/', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER), ExamController.createExam);
+router.patch('/:id', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER), ExamController.updateExam);
+router.delete('/:id', authorize(UserRole.SCHOOL_ADMIN), ExamController.deleteExam);
+
+router.post('/:examId/results', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER), ExamController.addResults);
+router.get('/:examId/results', ExamController.getExamResults);
+router.get('/:examId/merit', ExamController.getMeritList);
+router.get('/:examId/admit-cards', ExamController.getAdmitCards);
 
 export default router;

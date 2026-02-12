@@ -155,6 +155,8 @@ class FeeService {
         });
 
         feeRecord.paidAmount = newPaidAmount;
+        feeRecord.remainingAmount = feeRecord.totalAmount + (feeRecord.lateFee || 0) - (feeRecord.discount || 0) - newPaidAmount;
+        if (feeRecord.remainingAmount <= 0) feeRecord.status = FeeStatus.PAID;
 
         await feeRecord.save();
         return feeRecord;
@@ -190,6 +192,88 @@ class FeeService {
             .populate('studentId', 'firstName lastName admissionNumber photo')
             .populate('sessionId', 'name')
             .sort({ createdAt: -1 });
+    }
+
+    /**
+     * Quick collect fee: find or create a fee record for student+month and record payment
+     */
+    async collectFee(
+        schoolId: string,
+        payload: {
+            studentId: string;
+            amount: number;
+            month?: string;
+            feeTitle?: string;
+            mode: PaymentMode;
+            transactionId?: string;
+            remarks?: string;
+            staffId: string;
+        }
+    ): Promise<IStudentFee> {
+        const session = await SessionRepository.findActive(schoolId);
+        if (!session) throw new ErrorResponse('No active session found', 400);
+
+        const month = payload.month || new Date().toLocaleString('default', { month: 'long' });
+        let feeRecord = await StudentFeeRepository.findByStudentMonth(
+            schoolId,
+            payload.studentId,
+            session._id.toString(),
+            month
+        );
+
+        if (!feeRecord) {
+            feeRecord = await StudentFeeRepository.create({
+                schoolId: new Types.ObjectId(schoolId) as any,
+                studentId: new Types.ObjectId(payload.studentId) as any,
+                sessionId: session._id,
+                month,
+                feeBreakdown: [{ title: payload.feeTitle || 'Fee', amount: payload.amount, type: 'monthly' }],
+                totalAmount: payload.amount,
+                paidAmount: 0,
+                remainingAmount: payload.amount,
+                status: FeeStatus.PENDING,
+                dueDate: new Date(),
+                payments: [],
+                discount: 0,
+                lateFee: 0,
+            } as any);
+        }
+
+        return await this.recordPayment(schoolId, feeRecord._id.toString(), {
+            amount: payload.amount,
+            mode: payload.mode,
+            staffId: payload.staffId,
+            transactionId: payload.transactionId,
+            remarks: payload.remarks,
+        });
+    }
+
+    /**
+     * Get fee summary stats for dashboard
+     */
+    async getFeeStats(schoolId: string): Promise<{
+        totalCollected: number;
+        outstanding: number;
+        collectionRate: number;
+        transactionCount: number;
+    }> {
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const [collected, pending, transactionCount] = await Promise.all([
+            StudentFee.aggregate([
+                { $match: { schoolId: schoolObjId, status: 'paid' } },
+                { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+            ]),
+            StudentFee.aggregate([
+                { $match: { schoolId: schoolObjId, status: { $in: ['pending', 'partial'] } } },
+                { $group: { _id: null, total: { $sum: '$remainingAmount' } } }
+            ]),
+            StudentFee.countDocuments({ schoolId: schoolObjId })
+        ]);
+        const totalCollected = collected[0]?.total ?? 0;
+        const outstanding = pending[0]?.total ?? 0;
+        const totalExpected = totalCollected + outstanding;
+        const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+        return { totalCollected, outstanding, collectionRate, transactionCount };
     }
 }
 

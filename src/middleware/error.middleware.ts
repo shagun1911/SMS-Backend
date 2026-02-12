@@ -6,8 +6,12 @@ const errorHandler = (err: any, _req: Request, res: Response, _next: NextFunctio
 
     error.message = err.message;
 
-    // Log to console for dev
-    console.log(err);
+    // Log to console for dev (skip full stack for expected 401 Unauthorized)
+    if (err.statusCode === 401) {
+        console.log(`[401] ${err.message}`);
+    } else {
+        console.log(err);
+    }
 
     // Mongoose bad ObjectId
     if (err.name === 'CastError') {

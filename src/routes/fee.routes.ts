@@ -14,7 +14,15 @@ const router = Router();
 
 router.use(protect, multitenant); // Global middlewares
 
+router.get('/stats', FeeController.getFeeStats);
 router.get('/', FeeController.listFees);
+
+router.post(
+    '/collect',
+    authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    auditLog('Fees'),
+    FeeController.collectFee
+);
 
 // Structure
 router.post(

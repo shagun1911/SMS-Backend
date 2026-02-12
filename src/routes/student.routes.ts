@@ -17,6 +17,12 @@ router
     )
     .get(StudentController.getStudents);
 
+router.post(
+    '/import',
+    authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    StudentController.importStudents
+);
+
 router
     .route('/:id')
     .get(StudentController.getStudent)

@@ -4,6 +4,7 @@ import User from '../models/user.model';
 import Student from '../models/student.model';
 import StudentFee from '../models/studentFee.model';
 import AuditLog from '../models/auditLog.model';
+import Session from '../models/session.model';
 import ErrorResponse from '../utils/errorResponse';
 
 class MasterController {
@@ -12,10 +13,11 @@ class MasterController {
      */
     async getGlobalStats(_req: Request, res: Response, next: NextFunction) {
         try {
-            const [totalSchools, totalStudents, totalUsers, registrationTrends, revenueData] = await Promise.all([
+            const [totalSchools, totalStudents, totalUsers, activeSessions, registrationTrends, revenueData] = await Promise.all([
                 School.countDocuments(),
                 Student.countDocuments(),
                 User.countDocuments(),
+                Session.countDocuments({ isActive: true }),
                 School.aggregate([
                     {
                         $group: {
@@ -46,7 +48,7 @@ class MasterController {
                     totalStudents,
                     totalUsers,
                     revenue,
-                    activeSessions: Math.floor(Math.random() * 20), // Still somewhat mock, but depends on real data soon
+                    activeSessions,
                     monthlyTrends
                 }
             });

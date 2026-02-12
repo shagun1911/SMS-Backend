@@ -6,6 +6,7 @@ import Student from '../models/student.model';
 import User from '../models/user.model';
 import StudentFee from '../models/studentFee.model';
 import AuditLog from '../models/auditLog.model';
+import Class from '../models/class.model';
 
 class SchoolController {
     /**
@@ -65,7 +66,11 @@ class SchoolController {
                 monthlyCollection,
                 pendingFees,
                 monthlyTrends,
-                recentActivities
+                recentActivities,
+                totalClasses,
+                classList,
+                genderAgg,
+                feeStats
             ] = await Promise.all([
                 Student.countDocuments({ schoolId, isActive: true }),
                 User.countDocuments({ schoolId, isActive: true, role: { $ne: UserRole.SUPER_ADMIN } }),
@@ -79,18 +84,37 @@ class SchoolController {
                 ]),
                 StudentFee.aggregate([
                     { $match: { schoolId, status: 'paid' } },
-                    {
-                        $group: {
-                            _id: '$month',
-                            total: { $sum: '$paidAmount' }
-                        }
-                    }
+                    { $group: { _id: '$month', total: { $sum: '$paidAmount' } } }
                 ]),
                 AuditLog.find({ schoolId })
                     .limit(5)
                     .sort({ createdAt: -1 })
-                    .populate('userId', 'name')
+                    .populate('userId', 'name'),
+                Class.countDocuments({ schoolId, isActive: true }),
+                Class.find({ schoolId, isActive: true }),
+                Student.aggregate([
+                    { $match: { schoolId, isActive: true } },
+                    { $group: { _id: '$gender', count: { $sum: 1 } } }
+                ]),
+                StudentFee.aggregate([
+                    { $match: { schoolId } },
+                    {
+                        $group: {
+                            _id: null,
+                            collected: { $sum: '$paidAmount' },
+                            total: { $sum: { $add: ['$paidAmount', '$remainingAmount'] } }
+                        }
+                    }
+                ])
             ]);
+            const totalSections = classList?.reduce((acc: number, c: any) => acc + (c.sections?.length || 1), 0) || 0;
+            const genderRatio = {
+                male: genderAgg?.find((g: any) => g._id === 'Male')?.count || 0,
+                female: genderAgg?.find((g: any) => g._id === 'Female')?.count || 0
+            };
+            const totalExpected = feeStats?.[0]?.total || 0;
+            const collected = feeStats?.[0]?.collected || 0;
+            const collectionRate = totalExpected > 0 ? Math.round((collected / totalExpected) * 100) : 0;
 
             // Format monthly trends to match labels
             const formattedTrends = last6Months.map(month => ({
@@ -105,7 +129,13 @@ class SchoolController {
                 pendingFees: pendingFees[0]?.total || 0,
                 pendingFeesCount: pendingFees[0]?.count || 0,
                 monthlyTrends: formattedTrends,
-                recentActivities: recentActivities.map(log => ({
+                totalClasses: totalClasses || 0,
+                totalSections,
+                avgClassSize: totalClasses ? Math.round(totalStudents / totalClasses) : 0,
+                genderRatio,
+                collectionRate,
+                attendanceRate: 0,
+                recentActivities: recentActivities.map((log: any) => ({
                     id: log._id,
                     event: log.action,
                     description: `${(log.userId as any)?.name}: ${log.description}`,
