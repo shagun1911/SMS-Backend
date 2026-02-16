@@ -28,7 +28,31 @@ You are a helpful AI assistant for a School Management System (SSMS). You ONLY:
 - Summarize student/teacher/fee/performance information in a professional way
 - Give step-by-step guidance for using the system when asked
 You NEVER: delete, update, or modify any data. You cannot access the database. You only format and explain the data given to you.
-Respond in the same language as the user (Hindi or English). Keep responses clear and concise.`;
+
+LANGUAGE RULE (MANDATORY):
+- If the user writes in Hindi or asks "Hindi mein batao", "Hindi mein jawab do", "reply in Hindi" → you MUST respond entirely in Hindi.
+- If the user writes in English or asks "in English", "reply in English" → respond entirely in English.
+- If the user asks for "mix", "dono", "both languages" → you may use a mix of Hindi and English as appropriate.
+- Default: respond in the SAME language the user used in their message. Hindi message → Hindi reply. English message → English reply.
+- Never ignore the user's language. Never reply in a different language than requested. Keep responses clear and concise.`;
+
+/** Detect preferred response language from user message. */
+function detectResponseLanguage(message: string): 'hindi' | 'english' | 'mix' {
+    const lower = message.toLowerCase().trim();
+    const hasDevanagari = /[\u0900-\u097F]/.test(message);
+
+    if (/mix|dono|both|donon|dono mein|both languages/i.test(lower)) return 'mix';
+    if (/english|angrezi|in english|reply in english|english me|english mein/i.test(lower)) return 'english';
+    if (/hindi|hindustani|hindi mein|hindi me|reply in hindi|jawab hindi|batao hindi|hindi mein batao|hindi mein jawab/i.test(lower)) return 'hindi';
+    if (hasDevanagari) return 'hindi';
+    return 'english';
+}
+
+function languageInstruction(lang: 'hindi' | 'english' | 'mix'): string {
+    if (lang === 'hindi') return 'IMPORTANT: You MUST respond entirely in Hindi (हिंदी). Use Hindi for the whole answer.';
+    if (lang === 'mix') return 'IMPORTANT: You may use a mix of Hindi and English (Hinglish) as appropriate for the user.';
+    return 'IMPORTANT: You MUST respond entirely in English.';
+}
 
 function detectIntent(message: string): DetectedIntent {
     const lower = message.toLowerCase().trim();
@@ -111,15 +135,23 @@ async function findStudentByNameAndClass(schoolId: string, name?: string, classN
 
 export async function processAIQuery(schoolId: string, message: string): Promise<string> {
     const intent = detectIntent(message);
+    const responseLang = detectResponseLanguage(message);
+    const langInstr = languageInstruction(responseLang);
 
     if (intent.type === 'general' && /delete|update|modify|change.*(all|database)/i.test(message)) {
-        return 'I can only provide insights and guidance. Administrative actions (like deleting or modifying data) must be performed manually in the system.';
+        return responseLang === 'hindi'
+            ? 'मैं केवल जानकारी और मार्गदर्शन दे सकता हूँ। डेटा हटाने या बदलने जैसे काम सिस्टम में खुद करने होंगे।'
+            : 'I can only provide insights and guidance. Administrative actions (like deleting or modifying data) must be performed manually in the system.';
     }
 
     if (intent.type === 'student_lookup') {
         const student = await findStudentByNameAndClass(schoolId, intent.params?.studentName, intent.params?.className);
         if (!student) {
-            return `No student found matching "${intent.params?.studentName || ''}" ${intent.params?.className ? `in class ${intent.params.className}` : ''}. Please check the name and class.`;
+            const namePart = intent.params?.studentName || '';
+            const classPart = intent.params?.className ? ` कक्षा ${intent.params.className} में` : '';
+            return responseLang === 'hindi'
+                ? `"${namePart}"${classPart} से मेल खाता कोई छात्र नहीं मिला। कृपया नाम और कक्षा जाँचें।`
+                : `No student found matching "${namePart}"${intent.params?.className ? ` in class ${intent.params.className}` : ''}. Please check the name and class.`;
         }
         const payments = await FeePayment.find({ schoolId, studentId: student._id }).sort({ paymentDate: -1 }).limit(20).lean();
         const results = await ExamResult.find({ schoolId, studentId: student._id }).populate('examId', 'title').sort({ createdAt: -1 }).limit(5).lean();
@@ -157,8 +189,8 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             lastExam: lastExam ? { title: (lastExam as any).examId?.title, percentage: lastExam.percentage, grade: lastExam.grade, subjects: examSubjects } : null,
             examResultsCount: results.length,
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following student data (JSON), generate a professional summary. Include: Admission & basic info, Fee summary (total, paid, due), Payment history summary, Attendance (if available), Exam/performance summary, Bus/transport (if any), and 1-2 lines on strength/weakness/trend if you can infer from data. Respond in the same language as the user (Hindi or English).\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nBased on the following student data (JSON), generate a professional summary. Include: Admission & basic info, Fee summary (total, paid, due), Payment history summary, Attendance (if available), Exam/performance summary, Bus/transport (if any), and 1-2 lines on strength/weakness/trend if you can infer from data.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'teacher_lookup') {
@@ -169,6 +201,11 @@ export async function processAIQuery(schoolId: string, message: string): Promise
         }
         const teachers = await User.find(filter).select('name email phone role subject qualification baseSalary createdAt').limit(5).lean();
         if (teachers.length === 0) {
+            if (responseLang === 'hindi') {
+                return intent.params?.teacherName
+                    ? `"${intent.params.teacherName}" नाम से कोई शिक्षक नहीं मिला।`
+                    : 'कोई शिक्षक नहीं मिला।';
+            }
             return intent.params?.teacherName
                 ? `No teacher found with name matching "${intent.params.teacherName}".`
                 : 'No teachers found.';
@@ -183,30 +220,42 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             baseSalary: t.baseSalary,
             joiningDate: t.createdAt,
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following teacher/staff data (JSON), give a short professional summary. Respond in the same language as the user.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nBased on the following teacher/staff data (JSON), give a short professional summary.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'fee_structure_query') {
         const session = await Session.findOne({ schoolId, isActive: true }).lean();
-        if (!session) return 'No active session found. Fee structure is set per session.';
+        if (!session) {
+            return responseLang === 'hindi'
+                ? 'कोई सक्रिय सत्र नहीं मिला। फीस संरचना सत्र के अनुसार सेट होती है।'
+                : 'No active session found. Fee structure is set per session.';
+        }
         const className = intent.params?.className || message.match(/class\s*(\d+|[ivx]+)/i)?.[1] || '';
         const structures = await FeeStructure.find({ schoolId, sessionId: session._id }).lean();
         const match = (structures as any[]).find((s) => s.class === className || (className && String(s.class).includes(className)));
         const structure = match || (structures as any[])[0];
-        if (!structure) return 'No fee structure found for this session.';
+        if (!structure) {
+            return responseLang === 'hindi'
+                ? 'इस सत्र के लिए कोई फीस संरचना नहीं मिली।'
+                : 'No fee structure found for this session.';
+        }
         const payload = {
             class: (structure as any).class,
             totalAmount: (structure as any).totalAmount ?? (structure as any).totalAnnualFee,
             components: (structure as any).components || [],
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following fee structure (JSON), answer clearly. Include total and breakdown if present. Respond in the same language as the user.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nBased on the following fee structure (JSON), answer clearly. Include total and breakdown if present.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'performance_summary' && (intent.params?.studentName || intent.params?.className)) {
         const student = await findStudentByNameAndClass(schoolId, intent.params?.studentName, intent.params?.className);
-        if (!student) return `No student found. Please specify name and class.`;
+        if (!student) {
+            return responseLang === 'hindi'
+                ? 'कोई छात्र नहीं मिला। कृपया नाम और कक्षा बताएँ।'
+                : 'No student found. Please specify name and class.';
+        }
         const results = await ExamResult.find({ schoolId, studentId: student._id }).populate('examId', 'title').sort({ createdAt: -1 }).limit(5).lean();
         const subjects: { subject: string; marks: number; max: number }[] = [];
         (results as any[]).forEach((r) => {
@@ -224,8 +273,8 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             subjectsSummary: subjects,
             attendancePercentage,
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following performance data (JSON), analyze: strong subject, weak subject, trend, and suggest one or two improvements. Respond in the same language as the user.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nBased on the following performance data (JSON), analyze: strong subject, weak subject, trend, and suggest one or two improvements.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'defaulters') {
@@ -239,8 +288,8 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             totalDue: (defaulters as any[]).reduce((s, d) => s + (d.dueAmount || 0), 0),
             sample: (defaulters as any[]).slice(0, 10).map((d) => ({ name: `${d.firstName} ${d.lastName}`, class: d.class, due: d.dueAmount })),
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following defaulters/fee dues data (JSON), give a short summary: how many defaulters, total pending amount, and any note. Respond in the same language as the user.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nBased on the following defaulters/fee dues data (JSON), give a short summary: how many defaulters, total pending amount, and any note.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'system_help') {
@@ -255,10 +304,10 @@ System help (SSMS):
 - Timetable: Timetable → Settings (set periods) → Timetable grid (fill subjects/teachers) → Save/Print.
 - Admit cards: Exams → Select exam → Admit Cards → Generate by class/section → Preview/Download/Print.
 `;
-        const prompt = `User asked: "${message}"\n\nUsing ONLY the following system guide, answer step-by-step in the same language as the user. If the question is not covered, say you can only help with the listed features.\n\n${guide}`;
-        return await generateWithGemini(prompt, SYSTEM_GUIDE);
+        const prompt = `User asked: "${message}"\n\nUsing ONLY the following system guide, answer step-by-step. If the question is not covered, say you can only help with the listed features.\n\n${guide}`;
+        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
-    const prompt = `User asked: "${message}"\n\nYou are a school management AI assistant. Respond briefly and helpfully in the same language as the user. If they are asking for student/teacher/fee/performance data, suggest they try: "Shagun class 10 details" or "Class 3 fee" or "Defaulters" or "How to create session".`;
-    return await generateWithGemini(prompt, SYSTEM_GUIDE);
+    const prompt = `User asked: "${message}"\n\nYou are a school management AI assistant. Respond briefly and helpfully. If they are asking for student/teacher/fee/performance data, suggest they try: "Shagun class 10 details" or "Class 3 fee" or "Defaulters" or "How to create session".`;
+    return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
 }
