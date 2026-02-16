@@ -3,7 +3,9 @@ import User from '../models/user.model';
 import School from '../models/school.model';
 import Student from '../models/student.model';
 import Session from '../models/session.model';
+import Plan from '../models/plan.model';
 import { UserRole, SubscriptionPlan, Board, Gender, StudentStatus } from '../types';
+import { updateUsageForSchool } from '../services/usage.service';
 
 /**
  * Seed initial administrative accounts and demo data if they don't exist
@@ -27,7 +29,26 @@ export const seedSystem = async () => {
             console.log('✅ Super Admin created successfully');
         }
 
-        // 2. Seed Demo School
+        // 2. Seed default plans (SaaS)
+        const planCount = await Plan.countDocuments();
+        if (planCount === 0) {
+            console.log('📋 Seeding default plans...');
+            await Plan.insertMany([
+                { name: 'Basic', maxStudents: 500, maxTeachers: 50, priceMonthly: 999, priceYearly: 9990, features: ['Basic support'], isActive: true },
+                { name: 'Standard', maxStudents: 1000, maxTeachers: 100, priceMonthly: 1999, priceYearly: 19990, features: ['Email support', 'Reports'], isActive: true },
+                { name: 'Premium', maxStudents: 1500, maxTeachers: 200, priceMonthly: 3999, priceYearly: 39990, features: ['Priority support', 'API access'], isActive: true },
+                { name: 'Enterprise', maxStudents: 2000, maxTeachers: 300, priceMonthly: 7999, priceYearly: 79990, features: ['Dedicated support', 'Custom limits'], isActive: true },
+            ]);
+            console.log('✅ Default plans created');
+        }
+
+        // 3. Backfill usage for all schools
+        const schools = await School.find().select('_id').lean();
+        for (const s of schools) {
+            await updateUsageForSchool((s as any)._id.toString());
+        }
+
+        // 4. Seed Demo School
         const demoSchoolEmail = 'demo@shagun.com';
         const existingSchool = await School.findOne({ email: demoSchoolEmail });
 
@@ -67,7 +88,7 @@ export const seedSystem = async () => {
                 adminUserId: adminId
             });
 
-            // 3. Seed active session for the school
+            // 5. Seed active session for the school
             const session = await Session.create({
                 schoolId: school._id,
                 sessionYear: '2024-25',
@@ -76,7 +97,7 @@ export const seedSystem = async () => {
                 isActive: true
             });
 
-            // 4. Seed School Admin
+            // 6. Seed School Admin
             await User.create({
                 _id: adminId,
                 schoolId: school._id,
@@ -88,7 +109,7 @@ export const seedSystem = async () => {
                 isActive: true
             });
 
-            // 5. Seed Staff
+            // 7. Seed Staff
             await User.create({
                 schoolId: school._id,
                 name: 'Maya Sharma',
@@ -100,7 +121,7 @@ export const seedSystem = async () => {
                 isActive: true
             });
 
-            // 6. Seed Students
+            // 8. Seed Students
             await Student.create([
                 {
                     schoolId: school._id,

@@ -5,6 +5,7 @@ import SessionRepository from '../repositories/session.repository';
 import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
 import { getTenantFilter } from '../utils/tenant';
+import { updateUsageForSchool } from './usage.service';
 
 class StudentService {
     /**
@@ -32,6 +33,7 @@ class StudentService {
             isActive: true,
         });
 
+        await updateUsageForSchool(schoolId);
         return student;
     }
 
@@ -115,6 +117,7 @@ class StudentService {
             isActive: false,
             status: StudentStatus.DISCONTINUED,
         });
+        await updateUsageForSchool(schoolId);
     }
 
     /**

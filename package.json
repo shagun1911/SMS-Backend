@@ -21,6 +21,7 @@
     "author": "Shagun Systems",
     "license": "PROPRIETARY",
     "dependencies": {
+        "@google/generative-ai": "^0.24.1",
         "bcryptjs": "^2.4.3",
         "cloudinary": "^1.41.0",
         "compression": "^1.7.4",

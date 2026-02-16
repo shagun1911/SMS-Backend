@@ -27,13 +27,25 @@ class AuthService {
      * Login with email and password
      */
     async login(email: string, password: string): Promise<{ user: IUser; tokens: IAuthTokens }> {
-        const user = await UserRepository.findByEmail(email);
+        const normalizedEmail = (email || '').trim().toLowerCase();
+        const user = await UserRepository.findByEmail(normalizedEmail);
         if (!user) {
             throw new ErrorResponse('Invalid credentials', 401);
         }
 
         // Since we select('+password') in findByEmail, user has password field
-        const isMatch = await (user as any).matchPassword(password);
+        let isMatch = false;
+        try {
+            isMatch = await (user as any).matchPassword(password);
+        } catch {
+            // matchPassword can throw if stored value is not a valid bcrypt hash
+        }
+        // One-time fix: if DB has plain-text password (e.g. from manual insert), accept and re-hash
+        if (!isMatch && (user as any).password === password) {
+            (user as any).password = password;
+            await (user as any).save(); // pre-save hook will hash it
+            isMatch = true;
+        }
         if (!isMatch) {
             throw new ErrorResponse('Invalid credentials', 401);
         }

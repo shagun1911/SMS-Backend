@@ -17,6 +17,10 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
             required: true,
             index: true,
         },
+        classId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Class',
+        },
         class: {
             type: String,
             required: true,
@@ -35,9 +39,19 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
                 isOptional: { type: Boolean, default: false },
             },
         ],
+        components: [
+            {
+                name: { type: String, required: true },
+                amount: { type: Number, required: true, min: 0 },
+                type: { type: String, enum: ['monthly', 'one-time'], default: 'monthly' },
+            },
+        ],
         totalAnnualFee: {
             type: Number,
-            required: true,
+            default: 0,
+        },
+        totalAmount: {
+            type: Number,
             default: 0,
         },
         isActive: {
@@ -52,10 +66,22 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
     }
 );
 
-// Pre-save hook to calculate total annual fee if not provided
+// Helper: annual contribution of one component (monthly → ×12, one-time → as-is)
+function componentAnnualAmount(c: { amount: number; type?: string }): number {
+    return (c.type === 'one-time') ? c.amount : (c.amount * 12);
+}
+
+// Pre-save hook to calculate total from components or fees
 feeStructureSchema.pre('save', function (next) {
-    if (this.isModified('fees')) {
+    if (this.components && this.components.length > 0) {
+        const total = this.components.reduce((acc, curr) => acc + componentAnnualAmount(curr), 0);
+        this.totalAmount = total;
+        this.totalAnnualFee = total;
+    } else if (this.fees && this.fees.length > 0) {
         this.totalAnnualFee = this.fees.reduce((acc, curr) => acc + curr.amount, 0);
+        if (this.totalAmount === undefined || this.totalAmount === 0) {
+            this.totalAmount = this.totalAnnualFee;
+        }
     }
     next();
 });

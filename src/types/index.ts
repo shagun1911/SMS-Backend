@@ -85,6 +85,8 @@ export interface ISchool extends Document {
     schoolName: string;
     schoolCode: string;
     logo?: string;
+    stamp?: string;
+    principalSignature?: string;
     email: string;
     phone: string;
     address: {
@@ -180,6 +182,12 @@ export interface IStudent extends Document {
     isActive: boolean;
     usesTransport: boolean;
     busId?: Types.ObjectId;
+    totalYearlyFee?: number;
+    paidAmount?: number;
+    dueAmount?: number;
+    initialDepositAmount?: number;
+    depositPaymentMode?: string;
+    depositDate?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -209,22 +217,42 @@ export enum PaymentMode {
     ONLINE = 'online',
     UPI = 'upi',
     CARD = 'card',
+    BANK = 'bank',
 }
 
 export interface IFeeStructure extends Document {
     _id: Types.ObjectId;
     schoolId: Types.ObjectId;
     sessionId: Types.ObjectId;
-    class: string;
-    fees: Array<{
+    classId?: Types.ObjectId;
+    class: string; // className e.g. "8th A"
+    fees?: Array<{
         title: string;
         type: FeeType;
         amount: number;
         description?: string;
         isOptional: boolean;
     }>;
-    totalAnnualFee: number;
+    components?: Array<{ name: string; amount: number; type?: 'monthly' | 'one-time' }>;
+    totalAnnualFee?: number;
+    totalAmount?: number;
     isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface IFeePayment extends Document {
+    _id: Types.ObjectId;
+    schoolId: Types.ObjectId;
+    studentId: Types.ObjectId;
+    classId?: Types.ObjectId;
+    receiptNumber: string;
+    amountPaid: number;
+    paymentMode: string;
+    paymentDate: Date;
+    previousDue: number;
+    remainingDue: number;
+    pdfPath?: string;
     createdAt: Date;
     updatedAt: Date;
 }

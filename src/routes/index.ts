@@ -15,6 +15,7 @@ import auditRoutes from './audit.routes';
 import sessionRoutes from './session.routes';
 import classRoutes from './class.routes';
 import timetableRoutes from './timetable.routes';
+import aiRoutes from './ai.routes';
 
 const router = Router();
 
@@ -34,5 +35,7 @@ router.use('/audit-logs', auditRoutes);
 router.use('/sessions', sessionRoutes);
 router.use('/classes', classRoutes);
 router.use('/timetable', timetableRoutes);
+
+router.use('/ai', aiRoutes);
 
 export default router;

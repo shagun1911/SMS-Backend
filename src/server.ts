@@ -32,10 +32,16 @@ connectDB().then(() => {
 // Security headers
 app.use(helmet());
 
-// CORS
+// CORS – allow multiple origins (e.g. localhost:3000 and 3001)
 app.use(
     cors({
-        origin: config.frontend.url,
+        origin: (config.frontend as any).origins?.length
+            ? (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+                const allowed = (config.frontend as any).origins as string[];
+                if (!origin || allowed.includes(origin)) cb(null, true);
+                else cb(null, false);
+            }
+            : config.frontend.url,
         credentials: true,
     })
 );
@@ -86,6 +92,7 @@ app.use(errorHandler);
 const PORT = config.port || 5000;
 
 const server = app.listen(PORT, () => {
+    const geminiStatus = config.gemini?.apiKey ? 'configured' : 'not set';
     console.log(`
   ╔═══════════════════════════════════════════════════════╗
   ║                                                       ║
@@ -94,6 +101,7 @@ const server = app.listen(PORT, () => {
   ║   🌍 Environment: ${config.env}                    ║
   ║   📡 Port: ${PORT}                                   ║
   ║   🔗 API: http://localhost:${PORT}/api/v1              ║
+  ║   🤖 Gemini: ${geminiStatus.padEnd(10)}                       ║
   ║                                                       ║
   ╚═══════════════════════════════════════════════════════╝
   `);

@@ -4,8 +4,10 @@ import { auditLog } from '../middleware/audit.middleware';
 import { validate } from '../middleware/validate.middleware';
 import {
     createFeeStructureSchema,
+    updateFeeStructureSchema,
     generateFeesSchema,
-    recordPaymentSchema
+    recordPaymentSchema,
+    payFeeSchema,
 } from '../schemas/fee.schema';
 import FeeController from '../controllers/fee.controller';
 import { UserRole } from '../types';
@@ -24,14 +26,30 @@ router.post(
     FeeController.collectFee
 );
 
-// Structure
+// Fee structure: list, get by class, get by id, create, update, delete, print
+router.get('/structure/list', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.listStructures);
+router.get('/structure/print/:id', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.printStructure);
+router.get('/structure/id/:id', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getStructureById);
+router.get('/structure/:classId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getStructure);
 router.post(
     '/structure',
-    authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN),
+    authorize(UserRole.SCHOOL_ADMIN),
     validate(createFeeStructureSchema),
     auditLog('Fees'),
     FeeController.createFeeStructure
-); // Create class structure
+);
+router.put('/structure/:id', authorize(UserRole.SCHOOL_ADMIN), validate(updateFeeStructureSchema), auditLog('Fees'), FeeController.updateFeeStructure);
+router.delete('/structure/:id', authorize(UserRole.SCHOOL_ADMIN), FeeController.deleteFeeStructure);
+
+// Yearly fee payment (receipt + PDF)
+router.post('/pay', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), validate(payFeeSchema), auditLog('Fees'), FeeController.payFee);
+
+// List payments (receipts)
+router.get('/payments', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.listPayments);
+// Student fee summary, receipt download, defaulters
+router.get('/student/:studentId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getStudentFees);
+router.get('/receipt/:receiptId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getReceipt);
+router.get('/defaulters', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getDefaulters);
 
 // Generation
 router.post(

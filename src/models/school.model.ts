@@ -34,6 +34,8 @@ const schoolSchema = new Schema<ISchool, ISchoolModel>(
             type: String,
             default: 'no-photo.jpg',
         },
+        stamp: { type: String },
+        principalSignature: { type: String },
         address: {
             street: { type: String, required: true },
             city: { type: String, required: true },

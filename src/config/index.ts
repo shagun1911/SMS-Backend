@@ -18,9 +18,13 @@ interface IConfig {
         cloudName: string;
         apiKey: string;
         apiSecret: string;
+        /** Multiple accounts (e.g. CLOUDINARY_2_CLOUD_NAME, CLOUDINARY_2_API_KEY, CLOUDINARY_2_API_SECRET). Tried in order when one is full. */
+        accounts: Array<{ cloudName: string; apiKey: string; apiSecret: string }>;
     };
     frontend: {
         url: string;
+        /** Comma-separated origins for CORS (defaults to url if not set) */
+        origins?: string[];
     };
     rateLimit: {
         windowMs: number;
@@ -28,6 +32,14 @@ interface IConfig {
     };
     upload: {
         maxFileSize: number;
+    };
+    gemini: {
+        apiKey: string;
+        model: string;
+    };
+    groq: {
+        apiKey: string;
+        model: string;
     };
 }
 
@@ -43,20 +55,52 @@ const config: IConfig = {
         accessExpire: process.env.JWT_ACCESS_EXPIRE || '15m',
         refreshExpire: process.env.JWT_REFRESH_EXPIRE || '7d',
     },
-    cloudinary: {
-        cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
-        apiKey: process.env.CLOUDINARY_API_KEY || '',
-        apiSecret: process.env.CLOUDINARY_API_SECRET || '',
-    },
-    frontend: {
-        url: process.env.FRONTEND_URL || 'http://localhost:3000',
-    },
+    cloudinary: (() => {
+        const accounts: Array<{ cloudName: string; apiKey: string; apiSecret: string }> = [];
+        const c1 = process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET;
+        if (c1) {
+            accounts.push({
+                cloudName: process.env.CLOUDINARY_CLOUD_NAME!,
+                apiKey: process.env.CLOUDINARY_API_KEY!,
+                apiSecret: process.env.CLOUDINARY_API_SECRET!,
+            });
+        }
+        for (let i = 2; i <= 10; i++) {
+            const name = process.env[`CLOUDINARY_${i}_CLOUD_NAME`];
+            const key = process.env[`CLOUDINARY_${i}_API_KEY`];
+            const secret = process.env[`CLOUDINARY_${i}_API_SECRET`];
+            if (name && key && secret) accounts.push({ cloudName: name, apiKey: key, apiSecret: secret });
+        }
+        return {
+            cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+            apiKey: process.env.CLOUDINARY_API_KEY || '',
+            apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+            accounts,
+        };
+    })(),
+    frontend: (() => {
+        const url = process.env.FRONTEND_URL || 'http://localhost:3000';
+        // In dev, allow both 3000 and 3001 unless CORS_ORIGINS is explicitly set
+        const defaultOrigins = 'http://localhost:3000,http://localhost:3001';
+        const originsStr = process.env.CORS_ORIGINS ?? (process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL || url : defaultOrigins);
+        const origins = originsStr.split(',').map((o) => o.trim()).filter(Boolean);
+        if (!origins.includes(url)) origins.unshift(url);
+        return { url, origins };
+    })(),
     rateLimit: {
         windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
         maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
     },
     upload: {
         maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10),
+    },
+    gemini: {
+        apiKey: process.env.GEMINI_API_KEY || '',
+        model: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
+    },
+    groq: {
+        apiKey: process.env.GROQ_API_KEY || '',
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     },
 };
 

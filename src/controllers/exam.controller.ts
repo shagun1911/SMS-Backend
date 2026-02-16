@@ -3,9 +3,11 @@ import { AuthRequest } from '../types';
 import Exam from '../models/exam.model';
 import ExamResult from '../models/examResult.model';
 import Student from '../models/student.model';
+import School from '../models/school.model';
 import { sendResponse } from '../utils/response';
 import { getTenantFilter } from '../utils/tenant';
 import ErrorResponse from '../utils/errorResponse';
+import { generateAdmitCardPDF } from '../services/pdfAdmitCard.service';
 
 class ExamController {
     async getExams(req: AuthRequest, res: Response, next: NextFunction) {
@@ -171,6 +173,41 @@ class ExamController {
                 },
             }));
             return sendResponse(res, cards, 'Admit cards generated', 200);
+        } catch (error) {
+            return next(error);
+        }
+    }
+
+    async getAdmitCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { examId, studentId } = req.params;
+            const exam = await Exam.findOne({ _id: examId, schoolId: req.schoolId });
+            if (!exam) return next(new ErrorResponse('Exam not found', 404));
+            const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId, isActive: true });
+            if (!student) return next(new ErrorResponse('Student not found', 404));
+            const school = await School.findById(req.schoolId);
+            if (!school) return next(new ErrorResponse('School not found', 404));
+            const buffer = await generateAdmitCardPDF({
+                school,
+                exam: { title: exam.title, startDate: exam.startDate, endDate: exam.endDate, type: exam.type },
+                student: {
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    admissionNumber: student.admissionNumber,
+                    class: student.class,
+                    section: student.section,
+                    rollNumber: student.rollNumber,
+                    fatherName: student.fatherName,
+                    photo: (student as any).photo,
+                },
+            });
+            res.setHeader('Content-Type', 'application/pdf');
+            const isPreview = req.query.preview === '1' || req.query.preview === 'true';
+            res.setHeader(
+                'Content-Disposition',
+                isPreview ? 'inline' : `attachment; filename=admit-card-${studentId}.pdf`
+            );
+            res.send(buffer);
         } catch (error) {
             return next(error);
         }

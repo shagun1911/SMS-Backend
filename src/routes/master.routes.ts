@@ -5,13 +5,19 @@ import { UserRole } from '../types';
 
 const router = Router();
 
-// All master routes require superadmin role
 router.use(protect);
 router.use(authorize(UserRole.SUPER_ADMIN));
 
-router.get('/stats', MasterController.getGlobalStats);
+router.get('/dashboard', MasterController.getDashboard);
 router.get('/schools', MasterController.getSchools);
-router.get('/activity', MasterController.getGlobalActivity);
 router.patch('/schools/:id', MasterController.updateSchool);
+
+router.get('/plans', MasterController.getPlans);
+router.post('/plans', MasterController.createPlan);
+router.put('/plans/:id', MasterController.updatePlan);
+router.delete('/plans/:id', MasterController.deletePlan);
+
+router.get('/subscription/:schoolId', MasterController.getSubscription);
+router.put('/subscription/:schoolId', MasterController.putSubscription);
 
 export default router;

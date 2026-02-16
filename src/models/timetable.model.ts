@@ -11,6 +11,7 @@ export interface ITimetableSlot {
 
 export interface ITimetable extends Document {
     schoolId: Types.ObjectId;
+    sessionId?: Types.ObjectId;
     className: string;
     section: string;
     dayOfWeek: number;  // 0 = Sunday, 1 = Monday, ... 5 = Friday
@@ -21,6 +22,7 @@ export interface ITimetable extends Document {
 const timetableSchema = new Schema<ITimetable>(
     {
         schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true },
+        sessionId: { type: Schema.Types.ObjectId, ref: 'Session', index: true },
         className: { type: String, required: true, trim: true },
         section: { type: String, required: true, trim: true, default: 'A' },
         dayOfWeek: { type: Number, required: true, min: 0, max: 6 },

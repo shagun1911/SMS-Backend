@@ -1,15 +1,28 @@
 import { Response, NextFunction } from 'express';
 import StudentService from '../services/student.service';
+import FeeService from '../services/fee.service';
+import { checkStudentLimit } from '../services/planLimit.service';
 import { AuthRequest } from '../types';
 
 class StudentController {
     /**
-     * Create Student
+     * Create Student (with optional initial deposit: creates first receipt and updates paidAmount/dueAmount)
      */
     async createStudent(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
+            await checkStudentLimit(req.schoolId!);
             const student = await StudentService.createStudent(req.schoolId!, req.body);
-
+            const initialDeposit = Number(req.body.initialDepositAmount) || 0;
+            if (initialDeposit > 0) {
+                await FeeService.processInitialDeposit(req.schoolId!, student, {
+                    initialDepositAmount: initialDeposit,
+                    paymentMode: req.body.paymentMode || 'cash',
+                    depositDate: req.body.depositDate ? new Date(req.body.depositDate) : undefined,
+                });
+                const updated = await StudentService.getStudent(req.schoolId!, student._id.toString());
+                res.status(201).json({ success: true, data: updated });
+                return;
+            }
             res.status(201).json({
                 success: true,
                 data: student,

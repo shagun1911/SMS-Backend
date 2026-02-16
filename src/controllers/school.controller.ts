@@ -7,6 +7,7 @@ import User from '../models/user.model';
 import StudentFee from '../models/studentFee.model';
 import AuditLog from '../models/auditLog.model';
 import Class from '../models/class.model';
+import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
 
 class SchoolController {
     /**
@@ -116,7 +117,15 @@ class SchoolController {
             const collected = feeStats?.[0]?.collected || 0;
             const collectionRate = totalExpected > 0 ? Math.round((collected / totalExpected) * 100) : 0;
 
-            // Format monthly trends to match labels
+            const [planLimits, usage] = await Promise.all([
+                getPlanLimitsForSchool(schoolId!),
+                getUsageForSchool(schoolId!),
+            ]);
+            const studentPct = planLimits.maxStudents > 0 ? (usage.totalStudents / planLimits.maxStudents) * 100 : 0;
+            const teacherPct = planLimits.maxTeachers > 0 ? (usage.totalTeachers / planLimits.maxTeachers) * 100 : 0;
+            const studentLimitWarning = usage.totalStudents >= planLimits.maxStudents ? 'exceeded' : studentPct >= 90 ? 'warning' : 'none';
+            const teacherLimitWarning = usage.totalTeachers >= planLimits.maxTeachers ? 'exceeded' : teacherPct >= 90 ? 'warning' : 'none';
+
             const formattedTrends = last6Months.map(month => ({
                 name: month,
                 total: monthlyTrends.find(t => t._id === month)?.total || 0
@@ -125,6 +134,10 @@ class SchoolController {
             sendResponse(res, {
                 totalStudents,
                 activeStaff,
+                planLimits: { maxStudents: planLimits.maxStudents, maxTeachers: planLimits.maxTeachers, planName: planLimits.planName },
+                usage: { totalStudents: usage.totalStudents, totalTeachers: usage.totalTeachers },
+                studentLimitWarning,
+                teacherLimitWarning,
                 monthlyCollection: monthlyCollection[0]?.total || 0,
                 pendingFees: pendingFees[0]?.total || 0,
                 pendingFeesCount: pendingFees[0]?.count || 0,

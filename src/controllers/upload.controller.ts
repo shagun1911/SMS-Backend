@@ -13,7 +13,9 @@ class UploadController {
             }
 
             let result;
-            if (config.cloudinary.cloudName && config.cloudinary.cloudName !== 'your_cloud_name') {
+            const hasCloudinary = (config.cloudinary.accounts?.length ?? 0) > 0
+                || (config.cloudinary.cloudName && config.cloudinary.cloudName !== 'your_cloud_name');
+            if (hasCloudinary) {
                 const folder = req.query.folder ? `ssms/${req.query.folder}` : 'ssms/uploads';
                 result = await uploadToCloudinary(req.file.buffer, folder);
             } else {

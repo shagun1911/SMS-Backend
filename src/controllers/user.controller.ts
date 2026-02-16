@@ -1,7 +1,9 @@
 import { Response, NextFunction } from 'express';
 import User from '../models/user.model';
 import ErrorResponse from '../utils/errorResponse';
-import { AuthRequest } from '../types';
+import { AuthRequest, UserRole } from '../types';
+import { checkTeacherLimit } from '../services/planLimit.service';
+import { updateUsageForSchool } from '../services/usage.service';
 
 class UserController {
     /**
@@ -55,15 +57,22 @@ class UserController {
      */
     async createUser(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const schoolId = req.schoolId;
+            const schoolId = req.schoolId!;
             req.body.schoolId = schoolId;
 
-            // Default password if not provided
+            if (req.body.role === UserRole.TEACHER) {
+                await checkTeacherLimit(schoolId);
+            }
+
             if (!req.body.password) {
                 req.body.password = 'Staff@123';
             }
 
             const user = await User.create(req.body);
+
+            if (user.role === UserRole.TEACHER) {
+                await updateUsageForSchool(schoolId);
+            }
 
             return res.status(201).json({
                 success: true,
@@ -90,10 +99,15 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to update this user`, 401));
             }
 
+            const previousUser = user;
             user = await User.findByIdAndUpdate(req.params.id, req.body, {
                 new: true,
                 runValidators: true
             });
+
+            if (previousUser.role === UserRole.TEACHER || (user as any).role === UserRole.TEACHER) {
+                await updateUsageForSchool(req.schoolId!);
+            }
 
             return res.status(200).json({
                 success: true,
@@ -115,12 +129,18 @@ class UserController {
                 return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
             }
 
-            // Ensure user belongs to the same school
             if (user.schoolId?.toString() !== req.schoolId) {
                 return next(new ErrorResponse(`Not authorized to delete this user`, 401));
             }
 
+            const schoolId = user.schoolId?.toString();
+            const wasTeacher = user.role === UserRole.TEACHER;
+
             await User.findByIdAndDelete(req.params.id);
+
+            if (wasTeacher && schoolId) {
+                await updateUsageForSchool(schoolId);
+            }
 
             return res.status(200).json({
                 success: true,
