@@ -32,14 +32,17 @@ connectDB().then(() => {
 // Security headers
 app.use(helmet());
 
-// CORS – allow multiple origins (e.g. localhost:3000 and 3001)
+// CORS – allow configured origins plus *.vercel.app for Vercel deployments
 app.use(
     cors({
         origin: (config.frontend as any).origins?.length
             ? (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
                 const allowed = (config.frontend as any).origins as string[];
-                if (!origin || allowed.includes(origin)) cb(null, true);
-                else cb(null, false);
+                if (!origin) return cb(null, true);
+                if (allowed.includes(origin)) return cb(null, true);
+                // Allow any Vercel deployment (*.vercel.app) so production/preview URLs work
+                if (/^https:\/\/[\w-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+                cb(null, false);
             }
             : config.frontend.url,
         credentials: true,

@@ -5,8 +5,12 @@ import config from '../config';
 const errorHandler = (err: any, req: Request, res: Response, _next: NextFunction) => {
     const origin = req.get('origin');
     const allowed = (config.frontend as any).origins as string[] | undefined;
-    if (origin && allowed?.length && allowed.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
+    const allowOrigin = origin && (
+        (allowed?.length && allowed.includes(origin)) ||
+        /^https:\/\/[\w-]+\.vercel\.app$/.test(origin)
+    );
+    if (allowOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', origin!);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     let error = { ...err };
