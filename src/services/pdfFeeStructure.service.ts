@@ -1,15 +1,11 @@
 // @ts-ignore - pdfkit may not have types
 import PDFDocument from 'pdfkit';
-import { IFeeStructure } from '../types';
-import { ISchool } from '../types';
-import { ISession } from '../types';
+import { IFeeStructure, ISchool, ISession } from '../types';
 import { fetchImageBuffer } from '../utils/fetchImage';
 
-const MARGIN = 40;
-const HEADER_TOP_PADDING = 24;
-const PAGE_WIDTH = 595; // A4
-const CONTENT_WIDTH = PAGE_WIDTH - 2 * MARGIN;
-const LOGO_SIZE = 40;
+const M = 28;
+const PW = 595;
+const CW = PW - 2 * M;
 
 export interface FeeStructurePDFOptions {
     school: ISchool;
@@ -18,11 +14,26 @@ export interface FeeStructurePDFOptions {
     logoUrl?: string | null;
 }
 
-export async function generateFeeStructurePDF(options: FeeStructurePDFOptions): Promise<Buffer> {
-    const { school, session, structure } = options;
-    const doc = new PDFDocument({ size: 'A4', margin: MARGIN, bufferPages: true });
+function money(n: number): string {
+    return Number(n || 0).toLocaleString('en-IN');
+}
+
+function logoPlaceholder(doc: any, x: number, y: number, sz: number) {
+    doc.circle(x + sz / 2, y + sz / 2, sz / 2).fill('#1a237e');
+    doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold').text('S', x + sz / 2 - 6, y + sz / 2 - 10, { width: 14 });
+    doc.fillColor('#000000');
+}
+
+function hLine(doc: any, y: number, color = '#bdbdbd', lw = 0.5) {
+    doc.lineWidth(lw).strokeColor(color).moveTo(M, y).lineTo(M + CW, y).stroke();
+}
+
+export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Promise<Buffer> {
+    const { school, session, structure } = opts;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
     const chunks: Buffer[] = [];
-    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('data', (c: Buffer) => chunks.push(c));
 
     const [logoBuf, stampBuf, sigBuf] = await Promise.all([
         fetchImageBuffer(school.logo),
@@ -30,140 +41,213 @@ export async function generateFeeStructurePDF(options: FeeStructurePDFOptions): 
         fetchImageBuffer((school as any).principalSignature),
     ]);
 
-    const sessionLabel = session?.sessionYear?.replace('-', '–') || '2025-26';
+    const sessionLabel = session?.sessionYear || '—';
     const items = (structure.components && structure.components.length > 0)
         ? structure.components
-        : (structure.fees || []).map((f: any) => ({ name: f.title || f.name, amount: f.amount, type: f.type === 'one-time' ? 'one-time' : 'monthly' }));
-    const total = structure.totalAmount ?? structure.totalAnnualFee ?? 0;
-    const quarterly = Math.ceil(total / 4);
-    const halfYearly = Math.ceil(total / 2);
+        : (structure.fees || []).map((f: any) => ({
+            name: f.title || f.name,
+            amount: f.amount,
+            type: f.type === 'one-time' ? 'one-time' : 'monthly',
+        }));
 
-    let y = HEADER_TOP_PADDING;
-
-    // Header: Logo (left) – image or placeholder
-    if (logoBuf) {
-        try {
-            doc.image(logoBuf, MARGIN, y, { width: LOGO_SIZE, height: LOGO_SIZE });
-        } catch {
-            doc.rect(MARGIN, y, LOGO_SIZE, LOGO_SIZE).fill('#374151');
-            doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('S', MARGIN + 12, y + 12, { width: 20 });
-            doc.fillColor('#000000');
-        }
-    } else {
-        doc.rect(MARGIN, y, LOGO_SIZE, LOGO_SIZE).fill('#374151');
-        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('S', MARGIN + 12, y + 12, { width: 20 });
-        doc.fillColor('#000000');
-    }
-
-    // School name (center-bold)
-    doc.fontSize(18).font('Helvetica-Bold');
-    const schoolName = school.schoolName || 'School Name';
-    doc.text(schoolName, MARGIN, y + 4, { width: CONTENT_WIDTH, align: 'center' });
-    y += LOGO_SIZE + 8;
-
-    // Address
-    const addr = [
-        [school.address?.street, school.address?.city, school.address?.state, school.address?.pincode].filter(Boolean).join(', '),
-        school.phone ? `Phone: ${school.phone}` : '',
-        school.email ? `Email: ${school.email}` : '',
-    ].filter(Boolean).join(' | ');
-    doc.fontSize(10).font('Helvetica');
-    doc.text(addr, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
-    y += 20;
-
-    // Horizontal line
-    doc.lineWidth(1.5).strokeColor('#374151');
-    doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
-    doc.lineWidth(1).strokeColor('#000000');
-    y += 20;
-
-    // Title: FEE STRUCTURE – SESSION 2025–26
-    doc.fontSize(14).font('Helvetica-Bold');
-    doc.text(`FEE STRUCTURE – SESSION ${sessionLabel}`, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
-    y += 22;
-
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Class: ${structure.class}`, MARGIN, y);
-    y += 24;
-
-    // Bordered table
-    const tableTop = y;
-    const rowHeight = 24;
-    const col1 = 60;   // S.No
-    const col2 = CONTENT_WIDTH - 120; // Fee Component
-    const col3 = 100;  // Amount
-
-    doc.font('Helvetica-Bold').fontSize(10);
-    doc.rect(MARGIN, tableTop, CONTENT_WIDTH, rowHeight).fillAndStroke('#f3f4f6', '#e5e7eb');
-    doc.fillColor('#000000');
-    doc.text('S.No', MARGIN + 8, tableTop + 8, { width: col1 - 16 });
-    doc.text('Fee Component', MARGIN + col1 + 8, tableTop + 8, { width: col2 - 16 });
-    doc.text('Amount (₹)', MARGIN + col1 + col2 + 8, tableTop + 8, { width: col3 - 16 });
-    y = tableTop + rowHeight;
-
-    // Per-row annual amount: monthly → amount×12, one-time → amount
-    const getAnnualAmount = (item: { amount: number; type?: string }) =>
+    const getAnnual = (item: { amount: number; type?: string }) =>
         item.type === 'one-time' ? item.amount : item.amount * 12;
 
-    doc.font('Helvetica').fontSize(10);
+    const totalAnnual = structure.totalAmount ?? structure.totalAnnualFee
+        ?? items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
+
+    const quarterly = Math.ceil(totalAnnual / 4);
+    const halfYearly = Math.ceil(totalAnnual / 2);
+    const monthly = Math.ceil(totalAnnual / 12);
+
+    // ── OUTER BORDER ──────────────────────────────────────────────────────────
+    doc.rect(8, 8, PW - 16, 826).lineWidth(2).strokeColor('#1a237e').stroke();
+    doc.rect(11, 11, PW - 22, 820).lineWidth(0.5).strokeColor('#9fa8da').stroke();
+
+    let y = 22;
+
+    // ── LOGO + SCHOOL HEADER ──────────────────────────────────────────────────
+    const LOGO_SZ = 64;
+    if (logoBuf) {
+        try { doc.image(logoBuf, M, y, { width: LOGO_SZ, height: LOGO_SZ }); }
+        catch { logoPlaceholder(doc, M, y, LOGO_SZ); }
+    } else { logoPlaceholder(doc, M, y, LOGO_SZ); }
+
+    const schoolName = school.schoolName || 'School Name';
+    const board = (school as any).board ? `Affiliated to ${(school as any).board}` : '';
+    const addr = [school.address?.street, school.address?.city, school.address?.state, school.address?.pincode].filter(Boolean).join(', ');
+    const contact = [school.phone ? `Ph: ${school.phone}` : '', school.email || ''].filter(Boolean).join('   |   ');
+
+    doc.fontSize(19).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.text(schoolName, M + LOGO_SZ + 8, y + 4, { width: CW - LOGO_SZ - 8, align: 'center' });
+
+    if (board) {
+        doc.fontSize(8).font('Helvetica').fillColor('#c62828');
+        doc.text(board, M + LOGO_SZ + 8, y + 28, { width: CW - LOGO_SZ - 8, align: 'center' });
+    }
+    doc.fontSize(8.5).font('Helvetica').fillColor('#424242');
+    doc.text(addr || '—', M + LOGO_SZ + 8, y + (board ? 40 : 30), { width: CW - LOGO_SZ - 8, align: 'center' });
+    doc.text(contact || '—', M + LOGO_SZ + 8, y + (board ? 52 : 42), { width: CW - LOGO_SZ - 8, align: 'center' });
+
+    y += LOGO_SZ + 12;
+    hLine(doc, y, '#1a237e', 1.5);
+    y += 2;
+
+    // ── TITLE BAR ──────────────────────────────────────────────────────────────
+    doc.rect(M, y, CW, 22).fill('#1a237e');
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.text('FEE STRUCTURE', M, y + 5, { width: CW, align: 'center' });
+    y += 22;
+
+    // ── SESSION + CLASS BANNER ────────────────────────────────────────────────
+    doc.rect(M, y, CW, 20).fill('#e8eaf6');
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.text(`Session: ${sessionLabel}`, M + 8, y + 5, { width: CW / 2 - 16 });
+    doc.text(`Class: ${structure.class || '—'}`, M + CW / 2, y + 5, { width: CW / 2 - 8, align: 'right' });
+    hLine(doc, y + 20, '#9fa8da', 0.5);
+    y += 20;
+
+    // ── FEE MONTHS LABEL ─────────────────────────────────────────────────────
+    doc.rect(M, y, CW, 18).fill('#fff9c4');
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#e65100');
+    doc.text('Due Months:', M + 8, y + 4, { width: 75 });
+    doc.font('Helvetica').fillColor('#333333');
+    doc.text('Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar  (12 Months)', M + 86, y + 4, { width: CW - 100 });
+    hLine(doc, y + 18, '#9fa8da', 0.5);
+    y += 18;
+
+    // ── FEE TABLE ─────────────────────────────────────────────────────────────
+    y += 6;
+
+    const colSNo = 34;
+    const colType = 90;
+    const colAmt = 90;
+    const colMonthly = 90;
+    const colName = CW - colSNo - colType - colAmt - colMonthly;
+
+    // Header
+    doc.rect(M, y, CW, 22).fill('#37474f');
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.text('S.No', M + 6, y + 6, { width: colSNo - 8, align: 'center' });
+    doc.text('Fee Component', M + colSNo + 6, y + 6, { width: colName - 8 });
+    doc.text('Type', M + colSNo + colName + 6, y + 6, { width: colType - 8, align: 'center' });
+    doc.text('Per Month (₹)', M + colSNo + colName + colType + 4, y + 6, { width: colMonthly - 8, align: 'right' });
+    doc.text('Annual (₹)', M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
+    y += 22;
+
+    doc.fontSize(8.5);
+    let totalRows = 0;
     items.forEach((item: { name: string; amount: number; type?: string }, i: number) => {
-        doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke('#e5e7eb');
-        doc.text(String(i + 1), MARGIN + 8, y + 8, { width: col1 - 16 });
-        const typeLabel = item.type === 'one-time' ? ' (One-time)' : item.type === 'monthly' ? ' (Monthly ×12)' : '';
-        doc.text(item.name + typeLabel, MARGIN + col1 + 8, y + 8, { width: col2 - 16 });
-        doc.text(Number(getAnnualAmount(item)).toLocaleString('en-IN'), MARGIN + col1 + col2 + 8, y + 8, { width: col3 - 16 });
-        y += rowHeight;
+        const annualAmt = getAnnual(item);
+        const monthlyAmt = item.type === 'one-time' ? 0 : item.amount;
+        const bg = i % 2 === 0 ? '#ffffff' : '#f5f6fa';
+        const h = 18;
+
+        doc.rect(M, y, CW, h).fill(bg);
+        // vertical lines
+        doc.lineWidth(0.3).strokeColor('#e0e0e0')
+            .moveTo(M + colSNo, y).lineTo(M + colSNo, y + h).stroke()
+            .moveTo(M + colSNo + colName, y).lineTo(M + colSNo + colName, y + h).stroke()
+            .moveTo(M + colSNo + colName + colType, y).lineTo(M + colSNo + colName + colType, y + h).stroke()
+            .moveTo(M + colSNo + colName + colType + colMonthly, y).lineTo(M + colSNo + colName + colType + colMonthly, y + h).stroke();
+        hLine(doc, y + h, '#e8e8e8', 0.3);
+
+        doc.font('Helvetica').fillColor('#212121');
+        doc.text(String(i + 1), M + 6, y + 4, { width: colSNo - 8, align: 'center' });
+        doc.text(item.name, M + colSNo + 6, y + 4, { width: colName - 8 });
+
+        const typeLabel = item.type === 'one-time' ? 'One-time' : 'Monthly';
+        const typeColor = item.type === 'one-time' ? '#e65100' : '#1565c0';
+        doc.fillColor(typeColor).text(typeLabel, M + colSNo + colName + 6, y + 4, { width: colType - 8, align: 'center' });
+
+        doc.fillColor('#212121');
+        doc.text(item.type === 'one-time' ? '—' : money(monthlyAmt), M + colSNo + colName + colType + 4, y + 4, { width: colMonthly - 8, align: 'right' });
+        doc.text(money(annualAmt), M + colSNo + colName + colType + colMonthly + 4, y + 4, { width: colAmt - 10, align: 'right' });
+
+        y += h;
+        totalRows++;
     });
 
-    doc.rect(MARGIN, y, CONTENT_WIDTH, rowHeight).stroke('#e5e7eb');
-    doc.font('Helvetica-Bold');
-    doc.text('', MARGIN + 8, y + 8, { width: col1 - 16 });
-    doc.text('TOTAL', MARGIN + col1 + 8, y + 8, { width: col2 - 16 });
-    doc.text(Number(total).toLocaleString('en-IN'), MARGIN + col1 + col2 + 8, y + 8, { width: col3 - 16 });
-    y += rowHeight + 20;
+    // Total Row
+    doc.rect(M, y, CW, 22).fill('#1a237e');
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.text('TOTAL ANNUAL FEE', M + colSNo + 6, y + 6, { width: colName + colType + colMonthly - 8 });
+    doc.text(`₹ ${money(totalAnnual)}`, M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
+    y += 22;
 
-    // Installment details
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('Installment Details:', MARGIN, y);
-    y += 18;
-    doc.font('Helvetica').fontSize(10);
-    doc.text(`Quarterly Option: ₹${quarterly.toLocaleString('en-IN')} x 4`, MARGIN, y);
-    y += 16;
-    doc.text(`Half-Yearly Option: ₹${halfYearly.toLocaleString('en-IN')} x 2`, MARGIN, y);
-    y += 24;
+    y += 12;
 
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('Terms & Conditions:', MARGIN, y);
-    y += 18;
-    doc.font('Helvetica').fontSize(10);
-    doc.text('• Fees once paid are non-refundable.', MARGIN, y);
-    y += 14;
-    doc.text('• Late fine applicable after due date.', MARGIN, y);
-    y += 28;
+    // ── PAYMENT SCHEDULE ──────────────────────────────────────────────────────
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.text('Payment Schedule Options', M, y);
+    y += 4;
+    hLine(doc, y, '#9fa8da', 0.8);
+    y += 10;
 
-    // Footer: Principal signature (left) and School stamp (right) – images or labels
-    const footerY = y;
+    const schedRows = [
+        { label: 'Monthly', value: monthly, note: 'per month × 12' },
+        { label: 'Quarterly', value: quarterly, note: 'per quarter × 4' },
+        { label: 'Half-Yearly', value: halfYearly, note: 'per installment × 2' },
+        { label: 'Yearly (Full)', value: totalAnnual, note: 'lump sum — full year' },
+    ];
+
+    const schedColW = CW / 4;
+    schedRows.forEach((s, i) => {
+        const sx = M + i * schedColW;
+        doc.rect(sx, y, schedColW - 4, 52).fillAndStroke(i % 2 === 0 ? '#e3f2fd' : '#e8f5e9', '#90caf9');
+        doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#1a237e');
+        doc.text(s.label, sx + 6, y + 8, { width: schedColW - 16, align: 'center' });
+        doc.fontSize(13).font('Helvetica-Bold').fillColor('#1565c0');
+        doc.text(`₹${money(s.value)}`, sx + 4, y + 22, { width: schedColW - 12, align: 'center' });
+        doc.fontSize(7.5).font('Helvetica').fillColor('#546e7a');
+        doc.text(s.note, sx + 4, y + 40, { width: schedColW - 12, align: 'center' });
+    });
+    y += 60;
+
+    // ── TERMS & CONDITIONS ────────────────────────────────────────────────────
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.text('Terms & Conditions', M, y);
+    y += 4;
+    hLine(doc, y, '#9fa8da', 0.6);
+    y += 8;
+
+    const terms = [
+        'Fees once paid are non-refundable under any circumstances.',
+        'A late fine will be applicable after the due date (15th of every month).',
+        'Fee must be paid by cash, cheque or online transfer as per school policy.',
+        'Cheques should be drawn in favor of the school name.',
+        'For any fee-related queries, contact the accounts office.',
+    ];
+
+    doc.fontSize(8.5).font('Helvetica').fillColor('#424242');
+    terms.forEach(term => {
+        doc.text(`•  ${term}`, M + 8, y, { width: CW - 16 });
+        y += 14;
+    });
+
+    y += 8;
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    hLine(doc, y, '#9fa8da', 0.6);
+    y += 10;
+
     if (sigBuf) {
-        try {
-            doc.image(sigBuf, MARGIN, footerY, { width: 80, height: 36 });
-        } catch {
-            doc.font('Helvetica').fontSize(10).text('Authorized Signature', MARGIN, footerY);
-        }
-    } else {
-        doc.font('Helvetica').fontSize(10).text('Authorized Signature', MARGIN, footerY);
+        try { doc.image(sigBuf, M + 10, y, { width: 90, height: 38 }); }
+        catch {}
     }
+    doc.lineWidth(0.7).strokeColor('#555').moveTo(M + 10, y + 42).lineTo(M + 130, y + 42).stroke();
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555').text('Authorized Signatory / Principal', M + 10, y + 44, { width: 120, align: 'center' });
+
     if (stampBuf) {
-        try {
-            doc.image(stampBuf, PAGE_WIDTH - MARGIN - 90, footerY, { width: 90, height: 40 });
-        } catch {
-            doc.font('Helvetica').fontSize(10).text('School Stamp', PAGE_WIDTH - MARGIN - 100, footerY, { width: 100, align: 'right' });
-        }
-    } else {
-        doc.font('Helvetica').fontSize(10).text('School Stamp', PAGE_WIDTH - MARGIN - 100, footerY, { width: 100, align: 'right' });
+        try { doc.image(stampBuf, PW - M - 110, y, { width: 90, height: 38 }); }
+        catch {}
     }
-    y = footerY + 44;
-    doc.fontSize(9).fillColor('#6b7280');
-    doc.text('This is a computer generated document.', MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
+    doc.lineWidth(0.7).strokeColor('#555').moveTo(PW - M - 120, y + 42).lineTo(PW - M - 10, y + 42).stroke();
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555').text('School Stamp & Seal', PW - M - 120, y + 44, { width: 110, align: 'center' });
+
+    y += 60;
+    doc.font('Helvetica').fontSize(7).fillColor('#9e9e9e');
+    doc.text('★  This is a computer generated document.  ★', M, y, { width: CW, align: 'center' });
 
     doc.end();
     return new Promise<Buffer>((resolve, reject) => {

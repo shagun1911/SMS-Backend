@@ -4,6 +4,7 @@ import Exam from '../models/exam.model';
 import ExamResult from '../models/examResult.model';
 import Student from '../models/student.model';
 import School from '../models/school.model';
+import Session from '../models/session.model';
 import { sendResponse } from '../utils/response';
 import { getTenantFilter } from '../utils/tenant';
 import ErrorResponse from '../utils/errorResponse';
@@ -187,9 +188,16 @@ class ExamController {
             if (!student) return next(new ErrorResponse('Student not found', 404));
             const school = await School.findById(req.schoolId);
             if (!school) return next(new ErrorResponse('School not found', 404));
+            const activeSession = await Session.findOne({ schoolId: req.schoolId, isActive: true }).lean();
             const buffer = await generateAdmitCardPDF({
                 school,
-                exam: { title: exam.title, startDate: exam.startDate, endDate: exam.endDate, type: exam.type },
+                exam: {
+                    title: exam.title,
+                    startDate: exam.startDate,
+                    endDate: exam.endDate,
+                    type: exam.type,
+                    sessionYear: (activeSession as any)?.sessionYear,
+                },
                 student: {
                     firstName: student.firstName,
                     lastName: student.lastName,
@@ -198,6 +206,9 @@ class ExamController {
                     section: student.section,
                     rollNumber: student.rollNumber,
                     fatherName: student.fatherName,
+                    motherName: (student as any).motherName,
+                    dateOfBirth: (student as any).dateOfBirth,
+                    phone: (student as any).phone,
                     photo: (student as any).photo,
                 },
             });

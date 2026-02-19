@@ -153,6 +153,26 @@ class FeeService {
 
         const school = await SchoolRepository.findById(schoolId);
         if (!school) throw new ErrorResponse('School not found', 404);
+
+        // Load fee components for itemized receipt
+        let feeComponents: Array<{ name: string; amount: number }> | undefined;
+        if (student.class) {
+            const feeStructure = await FeeStructureRepository.findByClass(
+                schoolId,
+                session._id.toString(),
+                student.class
+            );
+            if (feeStructure) {
+                const items = (feeStructure.components && feeStructure.components.length > 0)
+                    ? feeStructure.components
+                    : (feeStructure.fees || []).map((f: any) => ({ name: f.title || f.name, amount: f.amount, type: f.type }));
+                feeComponents = items.map((c: any) => ({
+                    name: c.name,
+                    amount: c.type === 'one-time' ? c.amount : c.amount * 12,
+                }));
+            }
+        }
+
         const pdfBuffer = await generateReceiptPDF({
             school,
             payment,
@@ -161,6 +181,8 @@ class FeeService {
             previousPaid,
             thisPayment: payload.amountPaid,
             remainingDue,
+            sessionYear: session.sessionYear,
+            feeComponents,
         });
 
         const receiptsDir = path.join(process.cwd(), 'receipts');
@@ -224,6 +246,24 @@ class FeeService {
         if (!student || !school) throw new ErrorResponse('Student or school not found', 404);
         const totalYearly = student.totalYearlyFee ?? 0;
         const previousPaid = (student.paidAmount ?? 0) - payment.amountPaid;
+
+        const session = await SessionRepository.findActive(schoolId);
+        let feeComponents: Array<{ name: string; amount: number }> | undefined;
+        if (student.class && session) {
+            const feeStructure = await FeeStructureRepository.findByClass(
+                schoolId, session._id.toString(), student.class
+            );
+            if (feeStructure) {
+                const rawItems = ((feeStructure.components ?? []).length > 0)
+                    ? (feeStructure.components ?? [])
+                    : (feeStructure.fees || []).map((f: any) => ({ name: f.title || f.name, amount: f.amount, type: f.type }));
+                feeComponents = rawItems.map((c: any) => ({
+                    name: c.name,
+                    amount: c.type === 'one-time' ? c.amount : c.amount * 12,
+                }));
+            }
+        }
+
         return await generateReceiptPDF({
             school,
             payment,
@@ -232,6 +272,8 @@ class FeeService {
             previousPaid,
             thisPayment: payment.amountPaid,
             remainingDue: payment.remainingDue,
+            sessionYear: session?.sessionYear,
+            feeComponents,
         });
     }
 
