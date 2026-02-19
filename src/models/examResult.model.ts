@@ -38,19 +38,16 @@ const examResultSchema = new Schema<IExamResult>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         examId: {
             type: Schema.Types.ObjectId,
             ref: 'Exam',
             required: true,
-            index: true,
         },
         studentId: {
             type: Schema.Types.ObjectId,
             ref: 'Student',
             required: true,
-            index: true,
         },
         class: {
             type: String,

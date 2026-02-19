@@ -1,7 +1,7 @@
 {
     "name": "ssms-backend",
     "version": "1.0.0",
-    "description": "SSMS - Shagun School Management System - Enterprise Backend",
+    "description": "SMS - School Management System - Enterprise Backend",
     "main": "dist/server.js",
     "scripts": {
         "dev": "nodemon --exec ts-node src/server.ts",
@@ -16,7 +16,7 @@
         "erp",
         "saas",
         "multi-tenant",
-        "ssms"
+        "sms"
     ],
     "author": "Shagun Systems",
     "license": "PROPRIETARY",

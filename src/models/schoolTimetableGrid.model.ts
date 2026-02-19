@@ -31,7 +31,7 @@ const rowSchema = new Schema({
 
 const schoolTimetableGridSchema = new Schema<ISchoolTimetableGrid>(
     {
-        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true, unique: true },
+        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, unique: true },
         sessionId: { type: Schema.Types.ObjectId, ref: 'Session' },
         rows: [rowSchema],
         isActive: { type: Boolean, default: true },

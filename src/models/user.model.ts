@@ -17,7 +17,6 @@ const userSchema = new Schema<IUser, IUserModel>(
             required: function (this: IUser) {
                 return this.role !== UserRole.SUPER_ADMIN;
             },
-            index: true,
         },
         name: {
             type: String,
@@ -72,7 +71,6 @@ const userSchema = new Schema<IUser, IUserModel>(
         isActive: {
             type: Boolean,
             default: true,
-            index: true,
         },
         lastLogin: {
             type: Date,

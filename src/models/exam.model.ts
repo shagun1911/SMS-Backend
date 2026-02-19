@@ -24,7 +24,6 @@ const examSchema = new Schema<IExam>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         sessionId: {
             type: Schema.Types.ObjectId,

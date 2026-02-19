@@ -16,7 +16,7 @@ export interface ITimetableSettings extends Document {
 
 const timetableSettingsSchema = new Schema<ITimetableSettings>(
     {
-        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true },
+        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true },
         sessionId: { type: Schema.Types.ObjectId, ref: 'Session' },
         periodCount: { type: Number, required: true, default: 7, min: 1, max: 12 },
         lunchAfterPeriod: { type: Number, required: true, default: 4, min: 0, max: 12 },

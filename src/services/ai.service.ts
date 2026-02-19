@@ -2,7 +2,6 @@ import Student from '../models/student.model';
 import FeePayment from '../models/feePayment.model';
 import FeeStructure from '../models/feeStructure.model';
 import ExamResult from '../models/examResult.model';
-import Attendance from '../models/attendance.model';
 import User from '../models/user.model';
 import Bus from '../models/bus.model';
 import Session from '../models/session.model';
@@ -155,11 +154,6 @@ export async function processAIQuery(schoolId: string, message: string): Promise
         }
         const payments = await FeePayment.find({ schoolId, studentId: student._id }).sort({ paymentDate: -1 }).limit(20).lean();
         const results = await ExamResult.find({ schoolId, studentId: student._id }).populate('examId', 'title').sort({ createdAt: -1 }).limit(5).lean();
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const attendanceCount = await Attendance.countDocuments({ schoolId, studentId: student._id, date: { $gte: thirtyDaysAgo } });
-        const presentCount = await Attendance.countDocuments({ schoolId, studentId: student._id, date: { $gte: thirtyDaysAgo }, status: 'present' });
-        const attendancePercentage = attendanceCount > 0 ? Math.round((presentCount / attendanceCount) * 100) : null;
         let busInfo = null;
         if ((student as any).busId) {
             const bus = await Bus.findById((student as any).busId).lean();
@@ -185,11 +179,10 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             },
             feePaymentsCount: payments.length,
             recentPayments: (payments as any[]).slice(0, 5).map((p) => ({ amount: p.amountPaid, date: p.paymentDate, mode: p.paymentMode })),
-            attendanceLast30Days: attendanceCount > 0 ? { totalDays: attendanceCount, present: presentCount, percentage: attendancePercentage } : null,
             lastExam: lastExam ? { title: (lastExam as any).examId?.title, percentage: lastExam.percentage, grade: lastExam.grade, subjects: examSubjects } : null,
             examResultsCount: results.length,
         };
-        const prompt = `User asked: "${message}"\n\nBased on the following student data (JSON), generate a professional summary. Include: Admission & basic info, Fee summary (total, paid, due), Payment history summary, Attendance (if available), Exam/performance summary, Bus/transport (if any), and 1-2 lines on strength/weakness/trend if you can infer from data.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
+        const prompt = `User asked: "${message}"\n\nBased on the following student data (JSON), generate a professional summary. Include: Admission & basic info, Fee summary (total, paid, due), Payment history summary, Exam/performance summary, Bus/transport (if any), and 1-2 lines on strength/weakness/trend if you can infer from data.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
         return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
@@ -263,15 +256,11 @@ export async function processAIQuery(schoolId: string, message: string): Promise
                 subjects.push({ subject: s.subject, marks: s.obtainedMarks, max: s.maxMarks });
             });
         });
-        const attendanceCount = await Attendance.countDocuments({ schoolId, studentId: student._id });
-        const presentCount = await Attendance.countDocuments({ schoolId, studentId: student._id, status: 'present' });
-        const attendancePercentage = attendanceCount > 0 ? Math.round((presentCount / attendanceCount) * 100) : null;
         const payload = {
             studentName: `${(student as any).firstName} ${(student as any).lastName}`,
             class: (student as any).class,
             examResults: (results as any[]).map((r) => ({ exam: (r as any).examId?.title, percentage: r.percentage, grade: r.grade })),
             subjectsSummary: subjects,
-            attendancePercentage,
         };
         const prompt = `User asked: "${message}"\n\nBased on the following performance data (JSON), analyze: strong subject, weak subject, trend, and suggest one or two improvements.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
         return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);

@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { protect, authorize, multitenant } from '../middleware/auth.middleware';
-import { auditLog } from '../middleware/audit.middleware';
 import { validate } from '../middleware/validate.middleware';
 import {
     generateSalariesSchema,
@@ -18,7 +17,6 @@ router.post(
     '/generate',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN),
     validate(generateSalariesSchema),
-    auditLog('Salary'),
     SalaryController.generateSalaries
 ); // Monthly run
 
@@ -27,14 +25,12 @@ router.post(
     '/:salaryId/pay',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
     validate(processSalaryPaymentSchema),
-    auditLog('Salary'),
     SalaryController.processPayment
 ); // Pay Salary
 
 router.patch(
     '/:salaryId',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
-    auditLog('Salary'),
     SalaryController.updateSalary
 );
 

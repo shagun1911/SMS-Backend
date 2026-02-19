@@ -9,19 +9,16 @@ const studentFeeSchema = new Schema<IStudentFee, IStudentFeeModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         studentId: {
             type: Schema.Types.ObjectId,
             ref: 'Student',
             required: true,
-            index: true,
         },
         sessionId: {
             type: Schema.Types.ObjectId,
             ref: 'Session',
             required: true,
-            index: true,
         },
         month: {
             type: String, // e.g., "April", "May" or "One-Time"
@@ -51,7 +48,6 @@ const studentFeeSchema = new Schema<IStudentFee, IStudentFeeModel>(
             type: String,
             enum: Object.values(FeeStatus),
             default: FeeStatus.PENDING,
-            index: true,
         },
         dueDate: {
             type: Date,

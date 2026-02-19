@@ -20,11 +20,6 @@ dotenv.config();
 // Initialize app
 const app = express();
 
-// Connect to database and seed
-connectDB().then(() => {
-    seedSystem();
-});
-
 // ============================================
 // MIDDLEWARE
 // ============================================
@@ -89,17 +84,18 @@ app.use((req: Request, res: Response) => {
 app.use(errorHandler);
 
 // ============================================
-// SERVER START
+// SERVER START – bind port first (required by Render), then connect DB
 // ============================================
 
 const PORT = config.port || 5000;
 
-const server = app.listen(PORT, () => {
+// Bind to 0.0.0.0 so the service is reachable on Render's assigned PORT
+const server = app.listen(PORT, '0.0.0.0', () => {
     const geminiStatus = config.gemini?.apiKey ? 'configured' : 'not set';
     console.log(`
   ╔═══════════════════════════════════════════════════════╗
   ║                                                       ║
-  ║   🚀 SSMS - Shagun School Management System         ║
+  ║   🚀 SMS - School Management System                   ║
   ║                                                       ║
   ║   🌍 Environment: ${config.env}                    ║
   ║   📡 Port: ${PORT}                                   ║
@@ -108,6 +104,12 @@ const server = app.listen(PORT, () => {
   ║                                                       ║
   ╚═══════════════════════════════════════════════════════╝
   `);
+    // Connect DB and seed after port is bound (so Render port scan succeeds)
+    connectDB().then(() => {
+        seedSystem();
+    }).catch((err) => {
+        console.error('Database connection failed:', err.message);
+    });
 });
 
 // Handle unhandled promise rejections

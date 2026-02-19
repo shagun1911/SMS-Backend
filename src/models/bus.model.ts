@@ -16,7 +16,6 @@ const busSchema = new Schema<IBus>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         busNumber: {
             type: String,

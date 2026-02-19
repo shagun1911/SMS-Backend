@@ -9,13 +9,11 @@ const otherPaymentSchema = new Schema<IOtherPayment, IOtherPaymentModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         staffId: {
             type: Schema.Types.ObjectId,
             ref: 'User',
             required: true,
-            index: true,
         },
         title: {
             type: String,
@@ -35,7 +33,6 @@ const otherPaymentSchema = new Schema<IOtherPayment, IOtherPaymentModel>(
         date: {
             type: Date,
             required: true,
-            index: true,
         },
         notes: {
             type: String,

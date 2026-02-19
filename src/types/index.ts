@@ -375,34 +375,6 @@ export interface IOtherPayment extends Document {
 }
 
 // ============================================
-// AUDIT LOG TYPES
-// ============================================
-
-export enum AuditAction {
-    CREATE = 'CREATE',
-    UPDATE = 'UPDATE',
-    DELETE = 'DELETE',
-    LOGIN = 'LOGIN',
-    LOGOUT = 'LOGOUT',
-    PAYMENT = 'PAYMENT',
-    SALARY_PAYMENT = 'SALARY_PAYMENT',
-    PROMOTION = 'PROMOTION',
-}
-
-export interface IAuditLog extends Document {
-    _id: Types.ObjectId;
-    schoolId?: Types.ObjectId;
-    userId: Types.ObjectId;
-    action: AuditAction;
-    module: string;
-    description: string;
-    metadata?: Record<string, any>;
-    ipAddress?: string;
-    userAgent?: string;
-    createdAt: Date;
-}
-
-// ============================================
 // API RESPONSE TYPES
 // ============================================
 

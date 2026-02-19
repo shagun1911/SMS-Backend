@@ -9,13 +9,11 @@ const salarySchema = new Schema<ISalaryRecord, ISalaryModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         staffId: {
             type: Schema.Types.ObjectId,
             ref: 'User',
             required: true,
-            index: true,
         },
         month: {
             type: String, // e.g., "April-2024"
@@ -54,7 +52,6 @@ const salarySchema = new Schema<ISalaryRecord, ISalaryModel>(
             type: String,
             enum: Object.values(SalaryStatus),
             default: SalaryStatus.PENDING,
-            index: true,
         },
         paymentDate: {
             type: Date,

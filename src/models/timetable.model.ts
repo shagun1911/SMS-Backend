@@ -21,8 +21,8 @@ export interface ITimetable extends Document {
 
 const timetableSchema = new Schema<ITimetable>(
     {
-        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true },
-        sessionId: { type: Schema.Types.ObjectId, ref: 'Session', index: true },
+        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true },
+        sessionId: { type: Schema.Types.ObjectId, ref: 'Session' },
         className: { type: String, required: true, trim: true },
         section: { type: String, required: true, trim: true, default: 'A' },
         dayOfWeek: { type: Number, required: true, min: 0, max: 6 },

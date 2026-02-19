@@ -9,13 +9,11 @@ const feePaymentSchema = new Schema<IFeePayment, IFeePaymentModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         studentId: {
             type: Schema.Types.ObjectId,
             ref: 'Student',
             required: true,
-            index: true,
         },
         classId: {
             type: Schema.Types.ObjectId,
@@ -25,7 +23,6 @@ const feePaymentSchema = new Schema<IFeePayment, IFeePaymentModel>(
             type: String,
             required: true,
             trim: true,
-            index: true,
         },
         amountPaid: {
             type: Number,

@@ -21,7 +21,6 @@ const classSchema = new Schema<IClass, IClassModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         className: {
             type: String,

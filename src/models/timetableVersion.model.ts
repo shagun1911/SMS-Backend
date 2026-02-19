@@ -33,9 +33,9 @@ const slotSnapshotSchema = new Schema({
 
 const timetableVersionSchema = new Schema<ITimetableVersion>(
     {
-        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true },
-        className: { type: String, required: true, index: true },
-        section: { type: String, required: true, default: 'A', index: true },
+        schoolId: { type: Schema.Types.ObjectId, ref: 'School', required: true },
+        className: { type: String, required: true },
+        section: { type: String, required: true, default: 'A' },
         version: { type: Number, required: true, default: 1 },
         days: [{
             dayOfWeek: Number,

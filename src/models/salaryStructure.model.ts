@@ -9,13 +9,11 @@ const salaryStructureSchema = new Schema<ISalaryStructure, ISalaryStructureModel
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         staffId: {
             type: Schema.Types.ObjectId,
             ref: 'User',
             required: true,
-            index: true,
         },
         baseSalary: {
             type: Number,
@@ -40,7 +38,6 @@ const salaryStructureSchema = new Schema<ISalaryStructure, ISalaryStructureModel
         isActive: {
             type: Boolean,
             default: true,
-            index: true,
         },
     },
     {

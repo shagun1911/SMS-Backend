@@ -9,13 +9,11 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         sessionId: {
             type: Schema.Types.ObjectId,
             ref: 'Session',
             required: true,
-            index: true,
         },
         classId: {
             type: Schema.Types.ObjectId,

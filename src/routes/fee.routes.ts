@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { protect, authorize, multitenant } from '../middleware/auth.middleware';
-import { auditLog } from '../middleware/audit.middleware';
 import { validate } from '../middleware/validate.middleware';
 import {
     createFeeStructureSchema,
@@ -22,7 +21,6 @@ router.get('/', FeeController.listFees);
 router.post(
     '/collect',
     authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
-    auditLog('Fees'),
     FeeController.collectFee
 );
 
@@ -35,14 +33,13 @@ router.post(
     '/structure',
     authorize(UserRole.SCHOOL_ADMIN),
     validate(createFeeStructureSchema),
-    auditLog('Fees'),
     FeeController.createFeeStructure
 );
-router.put('/structure/:id', authorize(UserRole.SCHOOL_ADMIN), validate(updateFeeStructureSchema), auditLog('Fees'), FeeController.updateFeeStructure);
+router.put('/structure/:id', authorize(UserRole.SCHOOL_ADMIN), validate(updateFeeStructureSchema), FeeController.updateFeeStructure);
 router.delete('/structure/:id', authorize(UserRole.SCHOOL_ADMIN), FeeController.deleteFeeStructure);
 
 // Yearly fee payment (receipt + PDF)
-router.post('/pay', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), validate(payFeeSchema), auditLog('Fees'), FeeController.payFee);
+router.post('/pay', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), validate(payFeeSchema), FeeController.payFee);
 
 // List payments (receipts)
 router.get('/payments', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.listPayments);
@@ -56,7 +53,6 @@ router.post(
     '/generate',
     authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
     validate(generateFeesSchema),
-    auditLog('Fees'),
     FeeController.generateFees
 ); // Monthly run
 
@@ -65,7 +61,6 @@ router.post(
     '/:feeId/pay',
     authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
     validate(recordPaymentSchema),
-    auditLog('Fees'),
     FeeController.recordPayment
 ); // Pay Fee
 

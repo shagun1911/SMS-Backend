@@ -9,7 +9,6 @@ const sessionSchema = new Schema<ISession, ISessionModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         sessionYear: {
             type: String, // e.g., "2024-2025"

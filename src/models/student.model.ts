@@ -9,7 +9,6 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             type: Schema.Types.ObjectId,
             ref: 'School',
             required: true,
-            index: true,
         },
         admissionNumber: {
             type: String,
@@ -21,7 +20,6 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             type: Schema.Types.ObjectId,
             ref: 'Session',
             required: true,
-            index: true,
         },
         // Personal Information
         firstName: {
@@ -86,7 +84,6 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         class: {
             type: String,
             required: true,
-            index: true,
         },
         section: {
             type: String,
@@ -128,7 +125,6 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             type: String,
             enum: Object.values(StudentStatus),
             default: StudentStatus.ACTIVE,
-            index: true,
         },
         isActive: {
             type: Boolean,

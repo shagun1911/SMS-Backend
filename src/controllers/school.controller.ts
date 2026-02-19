@@ -5,7 +5,6 @@ import { AuthRequest, UserRole } from '../types';
 import Student from '../models/student.model';
 import User from '../models/user.model';
 import StudentFee from '../models/studentFee.model';
-import AuditLog from '../models/auditLog.model';
 import Class from '../models/class.model';
 import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
 
@@ -67,7 +66,6 @@ class SchoolController {
                 monthlyCollection,
                 pendingFees,
                 monthlyTrends,
-                recentActivities,
                 totalClasses,
                 classList,
                 genderAgg,
@@ -87,10 +85,6 @@ class SchoolController {
                     { $match: { schoolId, status: 'paid' } },
                     { $group: { _id: '$month', total: { $sum: '$paidAmount' } } }
                 ]),
-                AuditLog.find({ schoolId })
-                    .limit(5)
-                    .sort({ createdAt: -1 })
-                    .populate('userId', 'name'),
                 Class.countDocuments({ schoolId, isActive: true }),
                 Class.find({ schoolId, isActive: true }),
                 Student.aggregate([
@@ -147,14 +141,7 @@ class SchoolController {
                 avgClassSize: totalClasses ? Math.round(totalStudents / totalClasses) : 0,
                 genderRatio,
                 collectionRate,
-                attendanceRate: 0,
-                recentActivities: recentActivities.map((log: any) => ({
-                    id: log._id,
-                    event: log.action,
-                    description: `${(log.userId as any)?.name}: ${log.description}`,
-                    time: log.createdAt,
-                    type: log.module.toLowerCase()
-                }))
+                recentActivities: []
             }, 'Dashboard statistics retrieved', 200);
         } catch (error) {
             next(error);
