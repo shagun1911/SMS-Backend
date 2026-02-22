@@ -144,18 +144,71 @@ export async function verifyPayment(req: AuthRequest, res: Response, next: NextF
 }
 
 /**
- * POST /payments/webhook
- * Razorpay sends events here. Must use raw body for signature verification.
- * Configure this URL in Razorpay Dashboard → Webhooks. Set RAZORPAY_WEBHOOK_SECRET to the secret shown there.
- * @see https://razorpay.com/docs/webhooks/validate-test/
+ * GET/POST /payments/webhook
+ * - GET: PhonePe URL validation (returns 200 so dashboard "Create" succeeds when URL is .../webhook).
+ * - POST with Authorization: PhonePe events (same handling as phonepe-webhook).
+ * - POST with x-razorpay-signature: Razorpay events (raw body).
  */
 export async function razorpayWebhook(req: WebhookRequest, res: Response, next: NextFunction) {
     try {
+        if (req.method === 'GET') {
+            return res.status(200).json({ ok: true, service: 'webhook' });
+        }
         const rawBody = req.body;
+        const signature = req.headers['x-razorpay-signature'] as string;
+        const authHeader = (req.headers.authorization || '').trim();
+        if (authHeader && !signature) {
+            const username = config.phonepe.webhookUsername;
+            const password = config.phonepe.webhookPassword;
+            if (username && password) {
+                const expectedHash = crypto.createHash('sha256').update(`${username}:${password}`).digest('hex');
+                const receivedHash = authHeader
+                    .replace(/^Bearer\s+/i, '')
+                    .replace(/^SHA256\s+/i, '')
+                    .trim();
+                if (receivedHash !== expectedHash) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+            }
+            if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
+                return res.status(200).json({ received: true });
+            }
+            let body: any;
+            try {
+                body = JSON.parse(rawBody.toString('utf8'));
+            } catch {
+                return res.status(200).json({ received: true });
+            }
+            const event = body.event || body.type;
+            const state = body.payload?.state;
+            const orderCompleted = event === 'checkout.order.completed' || event === 'pg.order.completed' || state === 'COMPLETED';
+            if (orderCompleted && body.payload) {
+                const meta = body.payload.metaInfo || {};
+                const schoolId = meta.udf1;
+                const planId = meta.udf2;
+                const interval = meta.udf3 || 'monthly';
+                if (schoolId && planId) {
+                    try {
+                        const start = new Date();
+                        const end = new Date();
+                        if (interval === 'yearly') end.setFullYear(end.getFullYear() + 1);
+                        else end.setMonth(end.getMonth() + 1);
+                        await SchoolSubscription.findOneAndUpdate(
+                            { schoolId },
+                            { planId, subscriptionStart: start, subscriptionEnd: end, status: 'active' },
+                            { upsert: true, new: true }
+                        );
+                        console.log('[PhonePe Webhook] subscription activated for school', schoolId);
+                    } catch (e) {
+                        console.error('[PhonePe Webhook] subscription activate failed:', e);
+                    }
+                }
+            }
+            return res.status(200).json({ received: true });
+        }
         if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
             return next(new ErrorResponse('Webhook body required', 400));
         }
-        const signature = req.headers['x-razorpay-signature'] as string;
         if (!signature || !config.razorpay.webhookSecret) {
             return res.status(200).json({ received: true });
         }
