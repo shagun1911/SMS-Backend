@@ -6,12 +6,11 @@ import Usage from '../models/usage.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 
-const now = new Date();
-
 export class MasterController {
     /** GET /master/dashboard – clean SaaS dashboard */
     async getDashboard(_req: Request, res: Response, next: NextFunction) {
         try {
+            const now = new Date();
             const [
                 totalSchools,
                 activeSubs,
@@ -20,7 +19,7 @@ export class MasterController {
                 monthlyNewSchools,
                 plansWithCount,
             ] = await Promise.all([
-                School.countDocuments(),
+                School.countDocuments({ isActive: true }),
                 SchoolSubscription.countDocuments({ status: 'active', subscriptionEnd: { $gte: now } }),
                 SchoolSubscription.countDocuments({ $or: [{ status: 'expired' }, { status: 'suspended' }, { subscriptionEnd: { $lt: now } }] }),
                 Usage.aggregate([{ $group: { _id: null, students: { $sum: '$totalStudents' }, teachers: { $sum: '$totalTeachers' } } }]),
@@ -70,6 +69,7 @@ export class MasterController {
     /** GET /master/schools – only real registered schools (isActive), table with Plan, Students, Teachers, Status */
     async getSchools(req: Request, res: Response, next: NextFunction) {
         try {
+            const now = new Date();
             const page = parseInt(req.query.page as string) || 1;
             const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
             const skip = (page - 1) * limit;
@@ -228,6 +228,7 @@ export class MasterController {
                 if (!plan) return next(new ErrorResponse('Plan not found', 404));
             }
 
+            const now = new Date();
             const start = subscriptionStart ? new Date(subscriptionStart) : now;
             const end = subscriptionEnd ? new Date(subscriptionEnd) : new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
             const newStatus = status === 'suspended' ? 'suspended' : end < now ? 'expired' : 'active';
@@ -297,6 +298,7 @@ export class MasterController {
     /** GET /master/billing-overview – revenue and plan distribution */
     async getBillingOverview(_req: Request, res: Response, next: NextFunction) {
         try {
+            const now = new Date();
             const activeSubs = await SchoolSubscription.find({
                 status: 'active',
                 subscriptionEnd: { $gte: now },
