@@ -11,7 +11,7 @@ class ClassController {
             const filter = getTenantFilter(req.schoolId!);
             const classes = await Class.find(filter)
                 .populate('classTeacherId', 'name')
-                .sort({ className: 1 });
+                .sort({ className: 1, section: 1 });
             return sendResponse(res, classes, 'Classes retrieved', 200);
         } catch (error) {
             return next(error);
@@ -20,12 +20,32 @@ class ClassController {
 
     async createClass(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const cls = await Class.create({
-                ...req.body,
+            const { className, section, roomNumber, capacity, classTeacherId } = req.body;
+            if (!className || !section) {
+                return next(new ErrorResponse('className and section are required', 400));
+            }
+            const sectionNorm = String(section).trim().toUpperCase();
+            const existing = await Class.findOne({
                 schoolId: req.schoolId,
+                className: String(className).trim(),
+                section: sectionNorm,
+            });
+            if (existing) {
+                return next(new ErrorResponse(`Class ${className} Section ${sectionNorm} already exists`, 400));
+            }
+            const cls = await Class.create({
+                schoolId: req.schoolId,
+                className: String(className).trim(),
+                section: sectionNorm,
+                roomNumber: roomNumber || undefined,
+                capacity: capacity != null ? Number(capacity) : undefined,
+                classTeacherId: classTeacherId || undefined,
             });
             return sendResponse(res, cls, 'Class created', 201);
-        } catch (error) {
+        } catch (error: any) {
+            if (error.code === 11000) {
+                return next(new ErrorResponse('This class and section combination already exists', 400));
+            }
             return next(error);
         }
     }
@@ -36,7 +56,12 @@ class ClassController {
             if (!cls) {
                 return next(new ErrorResponse('Class not found', 404));
             }
-            const updated = await Class.findByIdAndUpdate(req.params.id, req.body, { new: true });
+            const { roomNumber, capacity, classTeacherId, isActive } = req.body;
+            const updated = await Class.findByIdAndUpdate(
+                req.params.id,
+                { roomNumber, capacity, classTeacherId, isActive },
+                { new: true, runValidators: true }
+            );
             return sendResponse(res, updated, 'Class updated', 200);
         } catch (error) {
             return next(error);
@@ -63,9 +88,8 @@ class ClassController {
             if (!cls) {
                 return next(new ErrorResponse('Class not found', 404));
             }
-            const { section } = req.query;
-            const filter: any = { schoolId: req.schoolId, class: cls.className, isActive: true };
-            if (section && typeof section === 'string') filter.section = section;
+            const section = (cls as any).section ?? (cls as any).sections?.[0] ?? 'A';
+            const filter = { schoolId: req.schoolId, class: cls.className, section, isActive: true };
             const students = await Student.find(filter).sort({ rollNumber: 1, firstName: 1 });
             return sendResponse(res, students, 'Class students retrieved', 200);
         } catch (error) {

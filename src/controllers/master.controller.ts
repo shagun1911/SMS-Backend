@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import School from '../models/school.model';
-import Plan from '../models/plan.model';
+import Plan, { PLAN_FEATURE_KEYS } from '../models/plan.model';
 import SchoolSubscription from '../models/schoolSubscription.model';
 import Usage from '../models/usage.model';
 import ErrorResponse from '../utils/errorResponse';
@@ -67,16 +67,17 @@ export class MasterController {
         }
     }
 
-    /** GET /master/schools – table with Plan, Students, Teachers, Status, no student-level detail */
+    /** GET /master/schools – only real registered schools (isActive), table with Plan, Students, Teachers, Status */
     async getSchools(req: Request, res: Response, next: NextFunction) {
         try {
             const page = parseInt(req.query.page as string) || 1;
             const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
             const skip = (page - 1) * limit;
+            const filter = { isActive: true };
 
             const [schools, total] = await Promise.all([
-                School.find().skip(skip).limit(limit).sort({ createdAt: -1 }).lean(),
-                School.countDocuments(),
+                School.find(filter).skip(skip).limit(limit).sort({ createdAt: -1 }).lean(),
+                School.countDocuments(filter),
             ]);
 
             const schoolIds = (schools as any[]).map((s) => s._id);
@@ -144,7 +145,17 @@ export class MasterController {
     /** POST /master/plans */
     async createPlan(req: Request, res: Response, next: NextFunction) {
         try {
-            const plan = await Plan.create(req.body);
+            if (req.body.isDefault === true) {
+                await Plan.updateMany({}, { isDefault: false });
+            }
+            const priceMonthly = Number(req.body.priceMonthly) || 0;
+            const priceYearly = priceMonthly === 0 ? 0 : priceMonthly * 11;
+            const enabledFeatures = Array.isArray(req.body.enabledFeatures) ? req.body.enabledFeatures : [...PLAN_FEATURE_KEYS];
+            const plan = await Plan.create({
+                ...req.body,
+                priceYearly,
+                enabledFeatures,
+            });
             return sendResponse(res, plan, 'Plan created', 201);
         } catch (error) {
             next(error);
@@ -154,6 +165,18 @@ export class MasterController {
     /** PUT /master/plans/:id */
     async updatePlan(req: Request, res: Response, next: NextFunction) {
         try {
+            if (req.body.isDefault === true) {
+                await Plan.updateMany({ _id: { $ne: req.params.id } }, { isDefault: false });
+            }
+            const priceMonthly = Number(req.body.priceMonthly);
+            if (typeof priceMonthly === 'number' && !Number.isNaN(priceMonthly)) {
+                req.body.priceYearly = priceMonthly === 0 ? 0 : priceMonthly * 11;
+            }
+            if (Array.isArray(req.body.enabledFeatures)) {
+                // keep as sent
+            } else {
+                delete req.body.enabledFeatures;
+            }
             const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, {
                 new: true,
                 runValidators: true,
@@ -228,6 +251,106 @@ export class MasterController {
             }
             const populated = await SchoolSubscription.findById(sub._id).populate('planId').lean();
             return sendResponse(res, populated, 'Subscription updated', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** GET /master/usage-reports – usage by organization (school) for analytics */
+    async getUsageReports(_req: Request, res: Response, next: NextFunction) {
+        try {
+            const schools = await School.find({ isActive: true }).lean();
+            const schoolIds = (schools as any[]).map((s) => s._id);
+            const [subscriptions, usages] = await Promise.all([
+                SchoolSubscription.find({ schoolId: { $in: schoolIds } }).populate('planId', 'name maxStudents maxTeachers').lean(),
+                Usage.find({ schoolId: { $in: schoolIds } }).lean(),
+            ]);
+            const subBySchool = new Map((subscriptions as any[]).map((s) => [s.schoolId.toString(), s]));
+            const usageBySchool = new Map((usages as any[]).map((u) => [u.schoolId.toString(), u]));
+
+            const reports = (schools as any[]).map((s) => {
+                const sub = subBySchool.get(s._id.toString());
+                const usage = usageBySchool.get(s._id.toString());
+                const plan = sub?.planId as any;
+                const maxStudents = plan?.maxStudents ?? 0;
+                const maxTeachers = plan?.maxTeachers ?? 0;
+                const totalStudents = usage?.totalStudents ?? 0;
+                const totalTeachers = usage?.totalTeachers ?? 0;
+                return {
+                    schoolId: s._id,
+                    schoolName: s.schoolName,
+                    schoolCode: s.schoolCode,
+                    planName: plan?.name ?? '—',
+                    studentsUsed: totalStudents,
+                    studentsLimit: maxStudents,
+                    teachersUsed: totalTeachers,
+                    teachersLimit: maxTeachers,
+                };
+            });
+
+            return sendResponse(res, { reports }, 'OK', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** GET /master/billing-overview – revenue and plan distribution */
+    async getBillingOverview(_req: Request, res: Response, next: NextFunction) {
+        try {
+            const activeSubs = await SchoolSubscription.find({
+                status: 'active',
+                subscriptionEnd: { $gte: now },
+            })
+                .populate('planId', 'name priceMonthly priceYearly')
+                .lean();
+
+            const planCounts = new Map<string, { count: number; priceMonthly: number; priceYearly: number; name: string }>();
+            let monthlyRevenue = 0;
+            for (const sub of activeSubs as any[]) {
+                const plan = sub.planId;
+                if (!plan) continue;
+                monthlyRevenue += plan.priceMonthly ?? 0;
+                const id = plan._id.toString();
+                if (!planCounts.has(id)) {
+                    planCounts.set(id, {
+                        name: plan.name,
+                        count: 0,
+                        priceMonthly: plan.priceMonthly ?? 0,
+                        priceYearly: plan.priceYearly ?? 0,
+                    });
+                }
+                planCounts.get(id)!.count += 1;
+            }
+            const distribution: { planId: string; name: string; priceMonthly: number; priceYearly: number; count: number; revenueMonthly: number; revenueYearly: number }[] = [];
+            planCounts.forEach((v, planId) => {
+                const revMo = v.priceMonthly * v.count;
+                const revYr = v.priceYearly * v.count;
+                distribution.push({
+                    planId,
+                    name: v.name,
+                    priceMonthly: v.priceMonthly,
+                    priceYearly: v.priceYearly,
+                    count: v.count,
+                    revenueMonthly: revMo,
+                    revenueYearly: revYr,
+                });
+            });
+
+            const totalSchools = await School.countDocuments({ isActive: true });
+            const paidCount = activeSubs.length;
+
+            return sendResponse(
+                res,
+                {
+                    monthlyRevenue,
+                    annualRevenue: monthlyRevenue * 12,
+                    totalOrganizations: totalSchools,
+                    paidPlans: paidCount,
+                    distribution,
+                },
+                'OK',
+                200
+            );
         } catch (error) {
             next(error);
         }

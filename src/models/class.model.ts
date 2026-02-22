@@ -3,8 +3,8 @@ import { Schema, model, Model, Document, Types } from 'mongoose';
 export interface IClass extends Document {
     _id: Types.ObjectId;
     schoolId: Types.ObjectId;
-    className: string; // "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"
-    sections: string[]; // ["A", "B", "C"]
+    className: string; // "I", "II", "III", "IV", "V", ...
+    section: string;   // "A", "B", "C" – one document per (className, section)
     classTeacherId?: Types.ObjectId;
     roomNumber?: string;
     capacity?: number;
@@ -27,9 +27,11 @@ const classSchema = new Schema<IClass, IClassModel>(
             required: true,
             trim: true,
         },
-        sections: {
-            type: [String],
-            default: ['A'],
+        section: {
+            type: String,
+            required: true,
+            trim: true,
+            uppercase: true,
         },
         classTeacherId: {
             type: Schema.Types.ObjectId,
@@ -53,7 +55,7 @@ const classSchema = new Schema<IClass, IClassModel>(
     }
 );
 
-classSchema.index({ schoolId: 1, className: 1 }, { unique: true });
+classSchema.index({ schoolId: 1, className: 1, section: 1 }, { unique: true });
 
 const Class = model<IClass, IClassModel>('Class', classSchema);
 

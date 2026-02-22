@@ -13,6 +13,7 @@ import apiRoutes from './routes';
 import healthRoutes from './routes/health.routes';
 import errorHandler from './middleware/error.middleware';
 import { seedSystem } from './utils/seeder';
+import * as paymentController from './controllers/payment.controller';
 
 // Load env vars
 dotenv.config();
@@ -42,6 +43,13 @@ app.use(
             : config.frontend.url,
         credentials: true,
     })
+);
+
+// Razorpay webhook – must use raw body for signature verification (before express.json)
+app.use(
+    '/api/v1/payments/webhook',
+    express.raw({ type: 'application/json', limit: '64kb' }),
+    paymentController.razorpayWebhook
 );
 
 // Body parser

@@ -15,5 +15,6 @@ router.use(multitenant);
 router.get('/me', SchoolController.getMySchool);
 router.patch('/me', authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN), SchoolController.updateMySchool);
 router.get('/stats', authorize(UserRole.SCHOOL_ADMIN), SchoolController.getDashboardStats);
+router.get('/plans', SchoolController.getPlans);
 
 export default router;

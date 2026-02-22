@@ -20,4 +20,7 @@ router.delete('/plans/:id', MasterController.deletePlan);
 router.get('/subscription/:schoolId', MasterController.getSubscription);
 router.put('/subscription/:schoolId', MasterController.putSubscription);
 
+router.get('/usage-reports', MasterController.getUsageReports);
+router.get('/billing-overview', MasterController.getBillingOverview);
+
 export default router;

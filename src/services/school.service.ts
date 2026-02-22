@@ -1,5 +1,7 @@
 import School from '../models/school.model';
 import User from '../models/user.model';
+import Plan from '../models/plan.model';
+import SchoolSubscription from '../models/schoolSubscription.model';
 import { ISchool, IUser, UserRole, SubscriptionPlan } from '../types';
 import ErrorResponse from '../utils/errorResponse';
 
@@ -52,6 +54,22 @@ class SchoolService {
             await admin.save({ session });
 
             await session.commitTransaction();
+
+            // 7. Assign default plan if one is set (outside transaction)
+            const defaultPlan = await Plan.findOne({ isDefault: true });
+            if (defaultPlan && school._id) {
+                const start = new Date();
+                const end = new Date();
+                end.setFullYear(end.getFullYear() + 1);
+                await SchoolSubscription.create({
+                    schoolId: school._id,
+                    planId: defaultPlan._id,
+                    subscriptionStart: start,
+                    subscriptionEnd: end,
+                    status: 'active',
+                });
+            }
+
             return { school, admin };
         } catch (error) {
             await session.abortTransaction();

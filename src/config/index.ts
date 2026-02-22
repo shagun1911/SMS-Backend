@@ -41,6 +41,13 @@ interface IConfig {
         apiKey: string;
         model: string;
     };
+    razorpay: {
+        keyId: string;
+        keySecret: string;
+        webhookSecret: string;
+        successPath: string;
+        cancelPath: string;
+    };
 }
 
 const config: IConfig = {
@@ -101,6 +108,13 @@ const config: IConfig = {
     groq: {
         apiKey: process.env.GROQ_API_KEY || '',
         model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    },
+    razorpay: {
+        keyId: process.env.RAZORPAY_KEY_ID || '',
+        keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+        webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+        successPath: process.env.RAZORPAY_SUCCESS_PATH || '/plan',
+        cancelPath: process.env.RAZORPAY_CANCEL_PATH || '/plan',
     },
 };
 

@@ -93,17 +93,17 @@ class TimetableController {
             const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
                 .populate('rows.cells.teacherId', 'name')
                 .lean();
-            const classes = await Class.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1 }).lean();
-            const classNames = (classes as any[]).map((c) => c.className);
+            const classes = await Class.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1, section: 1 }).lean();
             const rows = (grid as any)?.rows || [];
             const periodCount = settings?.periodCount ?? 7;
             const totalCols = periodCount + 1;
-            const rowsWithCells = classNames.map((className) => {
-                const existing = rows.find((r: any) => r.className === className);
+            const rowsWithCells = (classes as any[]).map((cls) => {
+                const existing = rows.find((r: any) => r.className === cls.className && (r.section || 'A') === (cls.section || 'A'));
                 const cells = existing?.cells?.length ? existing.cells : Array.from({ length: totalCols }, () => ({}));
                 while (cells.length < totalCols) cells.push({});
                 return {
-                    className,
+                    className: cls.className,
+                    section: cls.section || 'A',
                     cells: cells.slice(0, totalCols).map((c: any) => {
                         const cell = c || {};
                         return {
@@ -114,7 +114,7 @@ class TimetableController {
                     }),
                 };
             });
-            return sendResponse(res, { settings, rows: rowsWithCells, classNames }, 'Timetable grid retrieved', 200);
+            return sendResponse(res, { settings, rows: rowsWithCells, classNames: (classes as any[]).map((c) => `${c.className}-${c.section || 'A'}`) }, 'Timetable grid retrieved', 200);
         } catch (error) {
             return next(error);
         }
@@ -129,6 +129,7 @@ class TimetableController {
             const totalCols = periodCount + 1;
             const gridRows = rows.map((r: any) => ({
                 className: r.className,
+                section: r.section || undefined,
                 cells: (r.cells || []).slice(0, totalCols).map((c: any) => ({
                     subject: c.subject || undefined,
                     teacherId: c.teacherId || undefined,
@@ -207,11 +208,11 @@ class TimetableController {
     async getTimetableByClass(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const classId = req.params.classId;
-            const section = req.query.section as string | undefined;
+            const sectionFromQuery = req.query.section as string | undefined;
             const cls = await Class.findOne({ _id: classId, schoolId: req.schoolId });
             if (!cls) return next(new ErrorResponse('Class not found', 404));
-            const filter: any = { schoolId: req.schoolId, className: cls.className, isActive: true };
-            if (section) filter.section = section;
+            const section = sectionFromQuery || (cls as any).section || (cls as any).sections?.[0] || 'A';
+            const filter = { schoolId: req.schoolId, className: cls.className, section, isActive: true };
             const timetables = await Timetable.find(filter)
                 .populate('slots.teacherId', 'name')
                 .sort({ dayOfWeek: 1 })
@@ -228,7 +229,7 @@ class TimetableController {
                     teacherName: s.teacherId?.name,
                 })),
             }));
-            return sendResponse(res, { class: cls, className: cls.className, section: section || cls.sections?.[0] || 'A', days }, 'Timetable retrieved', 200);
+            return sendResponse(res, { class: cls, className: cls.className, section, days }, 'Timetable retrieved', 200);
         } catch (error) {
             return next(error);
         }
@@ -380,7 +381,7 @@ class TimetableController {
                     teacherName: s.teacherId?.name,
                 })),
             }));
-            const sec = section || (cls.sections && cls.sections[0]) || 'A';
+            const sec = section || (cls as any).section || 'A';
             const classTeacherName = (cls as any).classTeacherId?.name;
             const buffer = await generateTimetablePDF({
                 school,

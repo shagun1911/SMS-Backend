@@ -21,19 +21,22 @@ interface DetectedIntent {
     params?: { studentName?: string; className?: string; teacherName?: string };
 }
 
-const SYSTEM_GUIDE = `
-You are a helpful AI assistant for a School Management System (SSMS). You ONLY:
-- Read and explain data that is provided to you as JSON/text
-- Summarize student/teacher/fee/performance information in a professional way
-- Give step-by-step guidance for using the system when asked
-You NEVER: delete, update, or modify any data. You cannot access the database. You only format and explain the data given to you.
-
-LANGUAGE RULE (MANDATORY):
-- If the user writes in Hindi or asks "Hindi mein batao", "Hindi mein jawab do", "reply in Hindi" → you MUST respond entirely in Hindi.
-- If the user writes in English or asks "in English", "reply in English" → respond entirely in English.
-- If the user asks for "mix", "dono", "both languages" → you may use a mix of Hindi and English as appropriate.
-- Default: respond in the SAME language the user used in their message. Hindi message → Hindi reply. English message → English reply.
-- Never ignore the user's language. Never reply in a different language than requested. Keep responses clear and concise.`;
+const SYSTEM_GUIDE = [
+    'You are a helpful AI assistant for a School Management System (SSMS). You ONLY:',
+    '- Read and explain data that is provided to you as JSON/text',
+    '- Summarize student/teacher/fee/performance information in a professional way',
+    '- Give step-by-step guidance for using the system when asked',
+    'You NEVER: delete, update, or modify any data. You cannot access the database. You only format and explain the data given to you.',
+    '',
+    'PRIVACY (MANDATORY): All data provided to you belongs to ONE school only—the school of the logged-in user. You must NEVER refer to, infer, or mention data from any other school. Each school\'s data is strictly isolated. If asked about another school or cross-school data, say you only have access to the current school\'s data.',
+    '',
+    'LANGUAGE RULE (MANDATORY):',
+    '- If the user writes in Hindi or asks "Hindi mein batao", "Hindi mein jawab do", "reply in Hindi" → you MUST respond entirely in Hindi.',
+    '- If the user writes in English or asks "in English", "reply in English" → respond entirely in English.',
+    '- If the user asks for "mix", "dono", "both languages" → you may use a mix of Hindi and English as appropriate.',
+    '- Default: respond in the SAME language the user used in their message. Hindi message → Hindi reply. English message → English reply.',
+    "- Never ignore the user's language. Never reply in a different language than requested. Keep responses clear and concise.",
+].join('\n');
 
 /** Detect preferred response language from user message. */
 function detectResponseLanguage(message: string): 'hindi' | 'english' | 'mix' {
@@ -285,7 +288,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
         const guide = `
 System help (SSMS):
 - To create session: Go to Dashboard → Sessions → Add New. Fill start date, end date, session year. Save.
-- To create class: Go to Classes → Add Class. Enter class name and sections.
+- To create class: Go to Classes → Add Class & Section. Each class + section (e.g. 4 A, 4 B) is a separate entry.
 - To add student: Go to Students → Add Student. Fill admission and personal details.
 - To collect fee: Go to Collect Fee → Select student → Enter amount and payment mode.
 - To view receipts: Go to Receipts. You can Preview/Download/Print.

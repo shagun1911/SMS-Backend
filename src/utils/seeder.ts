@@ -29,17 +29,28 @@ export const seedSystem = async () => {
             console.log('✅ Super Admin created successfully');
         }
 
-        // 2. Seed default plans (SaaS)
+        // 2. Seed default plans (SaaS) – Free plan is default for every new school
         const planCount = await Plan.countDocuments();
         if (planCount === 0) {
             console.log('📋 Seeding default plans...');
             await Plan.insertMany([
-                { name: 'Basic', maxStudents: 500, maxTeachers: 50, priceMonthly: 999, priceYearly: 9990, features: ['Basic support'], isActive: true },
-                { name: 'Standard', maxStudents: 1000, maxTeachers: 100, priceMonthly: 1999, priceYearly: 19990, features: ['Email support', 'Reports'], isActive: true },
-                { name: 'Premium', maxStudents: 1500, maxTeachers: 200, priceMonthly: 3999, priceYearly: 39990, features: ['Priority support', 'API access'], isActive: true },
-                { name: 'Enterprise', maxStudents: 2000, maxTeachers: 300, priceMonthly: 7999, priceYearly: 79990, features: ['Dedicated support', 'Custom limits'], isActive: true },
+                { name: 'Free', description: 'Default for new schools', maxStudents: 100, maxTeachers: 10, priceMonthly: 0, priceYearly: 0, features: ['Basic access'], isActive: true, isDefault: true },
+                { name: 'Basic', maxStudents: 500, maxTeachers: 50, priceMonthly: 999, priceYearly: 9990, features: ['Basic support'], isActive: true, isDefault: false },
+                { name: 'Standard', maxStudents: 1000, maxTeachers: 100, priceMonthly: 1999, priceYearly: 19990, features: ['Email support', 'Reports'], isActive: true, isDefault: false },
+                { name: 'Premium', maxStudents: 1500, maxTeachers: 200, priceMonthly: 3999, priceYearly: 39990, features: ['Priority support', 'API access'], isActive: true, isDefault: false },
+                { name: 'Enterprise', maxStudents: 2000, maxTeachers: 300, priceMonthly: 7999, priceYearly: 79990, features: ['Dedicated support', 'Custom limits'], isActive: true, isDefault: false },
             ]);
-            console.log('✅ Default plans created');
+            console.log('✅ Default plans created (Free plan is default for new schools)');
+        }
+        // Ensure at least one plan is default (for existing DBs that may have no default)
+        const defaultPlanExists = await Plan.findOne({ isDefault: true });
+        if (!defaultPlanExists) {
+            const freePlan = await Plan.findOne({ name: 'Free' }) || await Plan.findOne().sort({ priceMonthly: 1 });
+            if (freePlan) {
+                await Plan.updateMany({}, { isDefault: false });
+                await Plan.findByIdAndUpdate(freePlan._id, { isDefault: true });
+                console.log('✅ Default plan set for new school registration');
+            }
         }
 
         // 3. Backfill usage for all schools

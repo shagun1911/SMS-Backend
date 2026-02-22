@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { protect, multitenant } from '../middleware/auth.middleware';
+import { protect, authorize, multitenant } from '../middleware/auth.middleware';
+import { UserRole } from '../types';
 import * as AiController from '../controllers/ai.controller';
 
 const router = Router();
@@ -13,7 +14,8 @@ const aiLimiter = rateLimit({
     keyGenerator: (req: any) => req.user?._id?.toString() || req.ip || 'anon',
 });
 
-router.use(protect, multitenant, aiLimiter);
+// Only school users: AI answers only from their school's data; Super Admin has no schoolId
+router.use(protect, multitenant, authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER), aiLimiter);
 
 router.post('/query', AiController.aiQuery);
 

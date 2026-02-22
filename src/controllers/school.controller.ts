@@ -7,6 +7,7 @@ import User from '../models/user.model';
 import StudentFee from '../models/studentFee.model';
 import Class from '../models/class.model';
 import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
+import Plan from '../models/plan.model';
 
 class SchoolController {
     /**
@@ -102,7 +103,7 @@ class SchoolController {
                     }
                 ])
             ]);
-            const totalSections = classList?.reduce((acc: number, c: any) => acc + (c.sections?.length || 1), 0) || 0;
+            const totalSections = classList?.length ?? 0;
             const genderRatio = {
                 male: genderAgg?.find((g: any) => g._id === 'Male')?.count || 0,
                 female: genderAgg?.find((g: any) => g._id === 'Female')?.count || 0
@@ -128,7 +129,12 @@ class SchoolController {
             sendResponse(res, {
                 totalStudents,
                 activeStaff,
-                planLimits: { maxStudents: planLimits.maxStudents, maxTeachers: planLimits.maxTeachers, planName: planLimits.planName },
+                planLimits: {
+                    maxStudents: planLimits.maxStudents,
+                    maxTeachers: planLimits.maxTeachers,
+                    planName: planLimits.planName,
+                    enabledFeatures: planLimits.enabledFeatures ?? [],
+                },
                 usage: { totalStudents: usage.totalStudents, totalTeachers: usage.totalTeachers },
                 studentLimitWarning,
                 teacherLimitWarning,
@@ -143,6 +149,16 @@ class SchoolController {
                 collectionRate,
                 recentActivities: []
             }, 'Dashboard statistics retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** GET /schools/plans – list active plans for upgrade page */
+    async getPlans(_req: Request, res: Response, next: NextFunction) {
+        try {
+            const plans = await Plan.find({ isActive: true }).sort({ priceMonthly: 1 }).lean();
+            sendResponse(res, plans, 'OK', 200);
         } catch (error) {
             next(error);
         }

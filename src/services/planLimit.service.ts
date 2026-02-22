@@ -1,28 +1,40 @@
 import SchoolSubscription from '../models/schoolSubscription.model';
 import Usage from '../models/usage.model';
 import ErrorResponse from '../utils/errorResponse';
+import { PLAN_FEATURE_KEYS } from '../models/plan.model';
 
 export interface PlanLimits {
     maxStudents: number;
     maxTeachers: number;
     planName: string;
+    /** Features enabled for this plan. If plan has none set, all features are allowed (backward compat). */
+    enabledFeatures: string[];
 }
 
-const DEFAULT_LIMITS: PlanLimits = { maxStudents: 10000, maxTeachers: 1000, planName: 'Default' };
+const DEFAULT_LIMITS: PlanLimits = {
+    maxStudents: 10000,
+    maxTeachers: 1000,
+    planName: 'Default',
+    enabledFeatures: [...PLAN_FEATURE_KEYS],
+};
 
 /**
  * Get plan limits for a school (from active subscription). Returns defaults if no subscription.
  */
 export async function getPlanLimitsForSchool(schoolId: string): Promise<PlanLimits> {
     const sub = await SchoolSubscription.findOne({ schoolId })
-        .populate<{ planId: { name: string; maxStudents: number; maxTeachers: number } }>('planId')
+        .populate<{ planId: { name: string; maxStudents: number; maxTeachers: number; enabledFeatures?: string[] } }>('planId')
         .lean();
     if (!sub?.planId) return DEFAULT_LIMITS;
     const plan = sub.planId as any;
+    const enabledFeatures = Array.isArray(plan.enabledFeatures) && plan.enabledFeatures.length > 0
+        ? plan.enabledFeatures
+        : [...PLAN_FEATURE_KEYS];
     return {
         maxStudents: plan.maxStudents ?? DEFAULT_LIMITS.maxStudents,
         maxTeachers: plan.maxTeachers ?? DEFAULT_LIMITS.maxTeachers,
         planName: plan.name ?? 'Plan',
+        enabledFeatures,
     };
 }
 

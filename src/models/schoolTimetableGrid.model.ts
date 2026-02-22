@@ -7,6 +7,7 @@ export interface ITimetableCell {
 
 export interface ITimetableGridRow {
     className: string;
+    section?: string; // one row per (className, section)
     cells: ITimetableCell[];
 }
 
@@ -26,6 +27,7 @@ const cellSchema = new Schema({
 
 const rowSchema = new Schema({
     className: { type: String, required: true, trim: true },
+    section: { type: String, trim: true, uppercase: true },
     cells: [cellSchema],
 }, { _id: false });
 
