@@ -61,7 +61,10 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
 
         if (isPhonePeConfigured()) {
             const amountPaise = Math.round(amount * 100);
-            const merchantOrderId = `plan_${schoolId}_${planId}_${interval}_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const ts = Date.now().toString(36);
+            const sid = String(schoolId).slice(-8);
+            const pid = String(planId).slice(-8);
+            const merchantOrderId = `p_${sid}_${pid}_${interval[0]}_${ts}`;
             const result = await createPhonePePayment({
                 merchantOrderId,
                 amountPaisa: amountPaise,

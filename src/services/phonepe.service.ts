@@ -25,7 +25,7 @@ export async function getPhonePeToken(): Promise<string> {
     const body = new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        client_version: clientVersion,
+        client_version: clientVersion || '1',
         grant_type: 'client_credentials',
     });
     const res = await fetch(PHONEPE_TOKEN_URL[env], {
