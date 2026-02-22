@@ -49,8 +49,13 @@ interface IConfig {
         cancelPath: string;
     };
     phonepe: {
+        clientId: string;
+        clientSecret: string;
+        clientVersion: string;
+        env: 'sandbox' | 'production';
         webhookUsername: string;
         webhookPassword: string;
+        successPath: string;
     };
 }
 
@@ -121,8 +126,13 @@ const config: IConfig = {
         cancelPath: process.env.RAZORPAY_CANCEL_PATH || '/plan',
     },
     phonepe: {
+        clientId: process.env.PHONEPE_CLIENT_ID || '',
+        clientSecret: process.env.PHONEPE_CLIENT_SECRET || '',
+        clientVersion: process.env.PHONEPE_CLIENT_VERSION || '1.0',
+        env: (process.env.PHONEPE_ENV === 'production' ? 'production' : 'sandbox') as 'sandbox' | 'production',
         webhookUsername: process.env.PHONEPE_WEBHOOK_USERNAME || '',
         webhookPassword: process.env.PHONEPE_WEBHOOK_PASSWORD || '',
+        successPath: process.env.PHONEPE_SUCCESS_PATH || '/plan',
     },
 };
 

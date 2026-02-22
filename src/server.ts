@@ -21,6 +21,9 @@ dotenv.config();
 // Initialize app
 const app = express();
 
+// Trust proxy (required when behind Render, Nginx, etc. so rate-limit and IP detection work)
+app.set('trust proxy', 1);
+
 // ============================================
 // MIDDLEWARE
 // ============================================

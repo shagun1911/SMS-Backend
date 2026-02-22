@@ -8,6 +8,7 @@ import SchoolSubscription from '../models/schoolSubscription.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 import { AuthRequest } from '../types';
+import { createPhonePePayment, isPhonePeConfigured } from '../services/phonepe.service';
 
 /** Webhook request body is raw (Buffer) - set by express.raw middleware */
 interface WebhookRequest extends Request {
@@ -21,7 +22,7 @@ const razorpay = config.razorpay.keyId && config.razorpay.keySecret
 /**
  * POST /payments/create-order
  * Body: { planId, interval: 'monthly' | 'yearly' }
- * School admin only. Creates Razorpay order; frontend uses orderId + keyId to open checkout.
+ * School admin only. Uses PhonePe if configured (returns redirectUrl); else Razorpay (orderId + keyId).
  */
 export async function createOrder(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -43,7 +44,8 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
         const isFreePlan = Number((plan as any).priceMonthly) === 0 && Number((plan as any).priceYearly) === 0;
 
         const frontendUrl = config.frontend.url.replace(/\/$/, '');
-        const successUrl = `${frontendUrl}${config.razorpay.successPath}?success=1`;
+        const successPath = isPhonePeConfigured() ? config.phonepe.successPath : config.razorpay.successPath;
+        const successUrl = `${frontendUrl}${successPath.startsWith('/') ? successPath : '/' + successPath}?success=1`;
 
         if (isFreePlan) {
             const start = new Date();
@@ -57,7 +59,23 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
             return sendResponse(res, { url: successUrl, isFree: true }, 'OK', 200);
         }
 
-        if (!razorpay) return next(new ErrorResponse('Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.', 503));
+        if (isPhonePeConfigured()) {
+            const amountPaise = Math.round(amount * 100);
+            const merchantOrderId = `plan_${schoolId}_${planId}_${interval}_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const result = await createPhonePePayment({
+                merchantOrderId,
+                amountPaisa: amountPaise,
+                redirectUrl: successUrl,
+                metaInfo: { udf1: String(schoolId), udf2: String(planId), udf3: interval },
+            });
+            return sendResponse(res, {
+                redirectUrl: result.redirectUrl,
+                merchantOrderId,
+                planName: (plan as any).name,
+            }, 'OK', 200);
+        }
+
+        if (!razorpay) return next(new ErrorResponse('Payment gateway not configured. Set PHONEPE_CLIENT_ID and PHONEPE_CLIENT_SECRET, or RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.', 503));
 
         const amountPaise = Math.round(amount * 100);
         const order = await razorpay.orders.create({
@@ -213,8 +231,34 @@ export async function phonepeWebhook(req: Request, res: Response, next: NextFunc
         }
         const body = req.body || {};
         const event = body.event || body.type;
+        const state = body.payload?.state;
         if (event) {
-            console.log('[PhonePe Webhook]', event, body.payload?.state || '');
+            console.log('[PhonePe Webhook]', event, state || '');
+        }
+        if ((event === 'pg.order.completed' || state === 'COMPLETED') && body.payload) {
+            const meta = body.payload.metaInfo || {};
+            const schoolId = meta.udf1;
+            const planId = meta.udf2;
+            const interval = meta.udf3 || 'monthly';
+            if (schoolId && planId) {
+                try {
+                    const start = new Date();
+                    const end = new Date();
+                    if (interval === 'yearly') {
+                        end.setFullYear(end.getFullYear() + 1);
+                    } else {
+                        end.setMonth(end.getMonth() + 1);
+                    }
+                    await SchoolSubscription.findOneAndUpdate(
+                        { schoolId },
+                        { planId, subscriptionStart: start, subscriptionEnd: end, status: 'active' },
+                        { upsert: true, new: true }
+                    );
+                    console.log('[PhonePe Webhook] subscription activated for school', schoolId);
+                } catch (e) {
+                    console.error('[PhonePe Webhook] subscription activate failed:', e);
+                }
+            }
         }
         return res.status(200).json({ received: true });
     } catch (err: any) {
