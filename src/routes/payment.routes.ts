@@ -5,6 +5,10 @@ import { UserRole } from '../types';
 
 const router = Router();
 
+// PhonePe webhook – no auth; GET for URL validation, POST for events
+router.get('/phonepe-webhook', paymentController.phonepeWebhook);
+router.post('/phonepe-webhook', paymentController.phonepeWebhook);
+
 router.post(
     '/create-order',
     protect,

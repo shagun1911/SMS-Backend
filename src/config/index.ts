@@ -48,6 +48,10 @@ interface IConfig {
         successPath: string;
         cancelPath: string;
     };
+    phonepe: {
+        webhookUsername: string;
+        webhookPassword: string;
+    };
 }
 
 const config: IConfig = {
@@ -115,6 +119,10 @@ const config: IConfig = {
         webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
         successPath: process.env.RAZORPAY_SUCCESS_PATH || '/plan',
         cancelPath: process.env.RAZORPAY_CANCEL_PATH || '/plan',
+    },
+    phonepe: {
+        webhookUsername: process.env.PHONEPE_WEBHOOK_USERNAME || '',
+        webhookPassword: process.env.PHONEPE_WEBHOOK_PASSWORD || '',
     },
 };
 

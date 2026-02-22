@@ -186,6 +186,38 @@ export async function razorpayWebhook(req: WebhookRequest, res: Response, next: 
         }
         return res.status(200).json({ received: true });
     } catch (err: any) {
-        next(err);
+        return next(err);
+    }
+}
+
+/**
+ * PhonePe webhook: GET for URL validation (dashboard "Create" check), POST for events.
+ * Use URL: /api/v1/payments/phonepe-webhook
+ * Set PHONEPE_WEBHOOK_USERNAME and PHONEPE_WEBHOOK_PASSWORD to match the credentials you set in PhonePe dashboard.
+ * @see https://developer.phonepe.com/payment-gateway/website-integration/standard-checkout/api-integration/api-reference/webhook
+ */
+export async function phonepeWebhook(req: Request, res: Response, next: NextFunction) {
+    try {
+        if (req.method === 'GET') {
+            return res.status(200).json({ ok: true, service: 'phonepe-webhook' });
+        }
+        const authHeader = (req.headers.authorization || '').trim();
+        const username = config.phonepe.webhookUsername;
+        const password = config.phonepe.webhookPassword;
+        if (username && password) {
+            const expectedHash = crypto.createHash('sha256').update(`${username}:${password}`).digest('hex');
+            const receivedHash = authHeader.replace(/^Bearer\s+/i, '').trim();
+            if (receivedHash !== expectedHash) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+        }
+        const body = req.body || {};
+        const event = body.event || body.type;
+        if (event) {
+            console.log('[PhonePe Webhook]', event, body.payload?.state || '');
+        }
+        return res.status(200).json({ received: true });
+    } catch (err: any) {
+        return next(err);
     }
 }
