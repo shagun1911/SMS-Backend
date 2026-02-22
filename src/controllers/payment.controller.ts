@@ -224,7 +224,10 @@ export async function phonepeWebhook(req: Request, res: Response, next: NextFunc
         const password = config.phonepe.webhookPassword;
         if (username && password) {
             const expectedHash = crypto.createHash('sha256').update(`${username}:${password}`).digest('hex');
-            const receivedHash = authHeader.replace(/^Bearer\s+/i, '').trim();
+            const receivedHash = authHeader
+                .replace(/^Bearer\s+/i, '')
+                .replace(/^SHA256\s+/i, '')
+                .trim();
             if (receivedHash !== expectedHash) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
