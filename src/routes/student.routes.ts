@@ -23,6 +23,24 @@ router.post(
     StudentController.importStudents
 );
 
+router.get(
+    '/promote/preview',
+    authorize(UserRole.SCHOOL_ADMIN),
+    StudentController.promotionPreview
+);
+
+router.post(
+    '/promote',
+    authorize(UserRole.SCHOOL_ADMIN),
+    StudentController.promoteStudents
+);
+
+router.get(
+    '/:id/id-card',
+    authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER),
+    StudentController.getIdCardPdf
+);
+
 router
     .route('/:id')
     .get(StudentController.getStudent)

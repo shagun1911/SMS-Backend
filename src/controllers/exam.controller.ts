@@ -9,6 +9,17 @@ import { sendResponse } from '../utils/response';
 import { getTenantFilter } from '../utils/tenant';
 import ErrorResponse from '../utils/errorResponse';
 import { generateAdmitCardPDF } from '../services/pdfAdmitCard.service';
+import { generateReportCardPDF } from '../services/pdfReportCard.service';
+
+function calculateGrade(percentage: number): string {
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C';
+    if (percentage >= 40) return 'D';
+    return 'F';
+}
 
 class ExamController {
     async getExams(req: AuthRequest, res: Response, next: NextFunction) {
@@ -77,7 +88,7 @@ class ExamController {
                 const totalMarks = resultData.subjects.reduce((sum: number, s: any) => sum + s.maxMarks, 0);
                 const totalObtained = resultData.subjects.reduce((sum: number, s: any) => sum + s.obtainedMarks, 0);
                 const percentage = (totalObtained / totalMarks) * 100;
-                const grade = this.calculateGrade(percentage);
+                const grade = calculateGrade(percentage);
 
                 const result = await ExamResult.findOneAndUpdate(
                     { examId, studentId: resultData.studentId, schoolId: req.schoolId },
@@ -179,6 +190,75 @@ class ExamController {
         }
     }
 
+    async getReportCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { studentId } = req.params;
+            const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId, isActive: true });
+            if (!student) return next(new ErrorResponse('Student not found', 404));
+            const school = await School.findById(req.schoolId);
+            if (!school) return next(new ErrorResponse('School not found', 404));
+            const activeSession = await Session.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+
+            const allResults = await ExamResult.find({ schoolId: req.schoolId, studentId }).lean();
+            if (!allResults.length) return next(new ErrorResponse('No exam results found for this student', 404));
+
+            const examIds = [...new Set(allResults.map(r => r.examId.toString()))];
+            const exams = await Exam.find({ _id: { $in: examIds } }).lean();
+            const examMap = new Map(exams.map(e => [e._id.toString(), e]));
+
+            const examResults = allResults
+                .map(r => {
+                    const exam = examMap.get(r.examId.toString());
+                    return {
+                        examTitle: exam?.title || 'Exam',
+                        examType: exam?.type,
+                        subjects: r.subjects.map((s: any) => ({
+                            subject: s.subject,
+                            maxMarks: s.maxMarks,
+                            obtainedMarks: s.obtainedMarks,
+                        })),
+                        totalMarks: r.totalMarks,
+                        totalObtained: r.totalObtained,
+                        percentage: r.percentage,
+                        grade: r.grade,
+                        rank: r.rank,
+                    };
+                })
+                .sort((a, b) => {
+                    const order = ['unit_test', 'quarterly', 'half_yearly', 'annual'];
+                    return order.indexOf(a.examType || '') - order.indexOf(b.examType || '');
+                });
+
+            const buffer = await generateReportCardPDF({
+                school,
+                sessionYear: (activeSession as any)?.sessionYear,
+                student: {
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    admissionNumber: student.admissionNumber,
+                    class: student.class,
+                    section: student.section,
+                    rollNumber: student.rollNumber,
+                    fatherName: student.fatherName,
+                    motherName: (student as any).motherName,
+                    dateOfBirth: (student as any).dateOfBirth,
+                    photo: (student as any).photo,
+                },
+                examResults,
+            });
+
+            res.setHeader('Content-Type', 'application/pdf');
+            const isPreview = req.query.preview === '1' || req.query.preview === 'true';
+            res.setHeader(
+                'Content-Disposition',
+                isPreview ? 'inline' : `attachment; filename=report-card-${studentId}.pdf`
+            );
+            res.send(buffer);
+        } catch (error) {
+            return next(error);
+        }
+    }
+
     async getAdmitCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { examId, studentId } = req.params;
@@ -224,15 +304,6 @@ class ExamController {
         }
     }
 
-    private calculateGrade(percentage: number): string {
-        if (percentage >= 90) return 'A+';
-        if (percentage >= 80) return 'A';
-        if (percentage >= 70) return 'B+';
-        if (percentage >= 60) return 'B';
-        if (percentage >= 50) return 'C';
-        if (percentage >= 40) return 'D';
-        return 'F';
-    }
 }
 
 export default new ExamController();

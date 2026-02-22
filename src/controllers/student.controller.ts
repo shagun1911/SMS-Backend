@@ -1,8 +1,15 @@
 import { Response, NextFunction } from 'express';
 import StudentService from '../services/student.service';
 import FeeService from '../services/fee.service';
+import PromotionService from '../services/promotion.service';
 import { checkStudentLimit } from '../services/planLimit.service';
 import { AuthRequest } from '../types';
+import Student from '../models/student.model';
+import School from '../models/school.model';
+import Session from '../models/session.model';
+import { sendResponse } from '../utils/response';
+import ErrorResponse from '../utils/errorResponse';
+import { generateIdCardPDF } from '../services/pdfIdCard.service';
 
 class StudentController {
     /**
@@ -150,6 +157,90 @@ class StudentController {
                 success: true,
                 data: {},
             });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Preview students eligible for promotion
+     */
+    async promotionPreview(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { fromClass } = req.query;
+            if (!fromClass) return next(new ErrorResponse('fromClass query param is required', 400));
+            const students = await Student.find({
+                schoolId: req.schoolId,
+                class: fromClass as string,
+                isActive: true,
+                status: 'active',
+            }).select('firstName lastName admissionNumber class section rollNumber').lean();
+            sendResponse(res, students, `${students.length} students eligible`, 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Batch promote students from one class to another
+     */
+    async promoteStudents(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { fromClass, toClass, newSessionId } = req.body;
+            if (!fromClass || !toClass || !newSessionId) {
+                return next(new ErrorResponse('fromClass, toClass, and newSessionId are required', 400));
+            }
+            const result = await PromotionService.promoteStudents(
+                req.schoolId!,
+                fromClass,
+                toClass,
+                newSessionId
+            );
+            sendResponse(res, result, `${result.promoted} students promoted successfully`, 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Generate Student ID Card PDF
+     */
+    async getIdCardPdf(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { id } = req.params;
+            const student = await Student.findOne({ _id: id, schoolId: req.schoolId, isActive: true });
+            if (!student) return next(new ErrorResponse('Student not found', 404));
+            const school = await School.findById(req.schoolId);
+            if (!school) return next(new ErrorResponse('School not found', 404));
+            const activeSession = await Session.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+
+            const buffer = await generateIdCardPDF({
+                school,
+                sessionYear: (activeSession as any)?.sessionYear,
+                student: {
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    admissionNumber: student.admissionNumber,
+                    class: student.class,
+                    section: student.section,
+                    rollNumber: student.rollNumber,
+                    fatherName: student.fatherName,
+                    motherName: (student as any).motherName,
+                    dateOfBirth: (student as any).dateOfBirth,
+                    bloodGroup: (student as any).bloodGroup,
+                    phone: (student as any).phone,
+                    photo: (student as any).photo,
+                    address: (student as any).address,
+                },
+            });
+
+            res.setHeader('Content-Type', 'application/pdf');
+            const isPreview = req.query.preview === '1' || req.query.preview === 'true';
+            res.setHeader(
+                'Content-Disposition',
+                isPreview ? 'inline' : `attachment; filename=id-card-${id}.pdf`
+            );
+            res.send(buffer);
         } catch (error) {
             next(error);
         }

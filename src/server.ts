@@ -1,10 +1,11 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import mongoSanitize from 'express-mongo-sanitize';
 
 // Internal modules
 import config from './config';
@@ -28,8 +29,11 @@ app.set('trust proxy', 1);
 // MIDDLEWARE
 // ============================================
 
-// Security headers
-app.use(helmet());
+// Security headers (configured for API + Vercel frontend)
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+}));
 
 // CORS – allow configured origins plus *.vercel.app for Vercel deployments
 app.use(
@@ -39,7 +43,6 @@ app.use(
                 const allowed = (config.frontend as any).origins as string[];
                 if (!origin) return cb(null, true);
                 if (allowed.includes(origin)) return cb(null, true);
-                // Allow any Vercel deployment (*.vercel.app) so production/preview URLs work
                 if (/^https:\/\/[\w-]+\.vercel\.app$/.test(origin)) return cb(null, true);
                 cb(null, false);
             }
@@ -62,16 +65,55 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 // Cookie parser
 app.use(cookieParser());
 
+// NoSQL injection prevention — strips $ and . from req.body, req.query, req.params
+app.use(mongoSanitize());
+
+// XSS prevention — strip dangerous HTML tags from string inputs
+function sanitizeStrings(obj: any): any {
+    if (typeof obj === 'string') {
+        return obj.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                  .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+                  .replace(/javascript\s*:/gi, '');
+    }
+    if (Array.isArray(obj)) return obj.map(sanitizeStrings);
+    if (obj && typeof obj === 'object') {
+        const cleaned: any = {};
+        for (const key of Object.keys(obj)) {
+            cleaned[key] = sanitizeStrings(obj[key]);
+        }
+        return cleaned;
+    }
+    return obj;
+}
+
+app.use((req: Request, _res: Response, next: NextFunction) => {
+    if (req.body && typeof req.body === 'object') req.body = sanitizeStrings(req.body);
+    next();
+});
+
 // Compression
 app.use(compression());
 
-// Rate limiting
+// General API rate limiting (100 requests per 15 minutes)
 const limiter = rateLimit({
     windowMs: config.rateLimit.windowMs,
     max: config.rateLimit.maxRequests,
-    message: 'Too many requests from this IP, please try again later.',
+    message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
 });
 app.use('/api', limiter);
+
+// Strict rate limit on auth routes (20 attempts per 15 minutes per IP)
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { success: false, message: 'Too many login attempts. Please try again after 15 minutes.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth/register', authLimiter);
 
 // ============================================
 // ROUTES

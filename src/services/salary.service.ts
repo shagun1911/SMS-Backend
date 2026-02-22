@@ -8,6 +8,58 @@ import { Types } from 'mongoose';
 
 class SalaryService {
     /**
+     * List salary records for a school (payroll run view) with optional filters.
+     * Populates staff name + role.
+     */
+    async listSchoolSalaries(
+        schoolId: string,
+        opts: { month?: string; year?: number; status?: string }
+    ): Promise<any[]> {
+        const filter: any = { schoolId };
+        if (opts.month) filter.month = opts.month;
+        if (opts.year) filter.year = opts.year;
+        if (opts.status) filter.status = opts.status;
+
+        const Salary = (await import('../models/salary.model')).default;
+        return Salary.find(filter)
+            .populate('staffId', 'name email role')
+            .sort({ createdAt: -1 })
+            .lean();
+    }
+
+    /**
+     * Summary stats for a month's payroll run.
+     */
+    async getPayrollSummary(
+        schoolId: string,
+        opts: { month?: string; year?: number }
+    ): Promise<{
+        totalRecords: number;
+        pendingCount: number;
+        paidCount: number;
+        holdCount: number;
+        totalNetAmount: number;
+        totalPendingAmount: number;
+        totalPaidAmount: number;
+    }> {
+        const filter: any = { schoolId };
+        if (opts.month) filter.month = opts.month;
+        if (opts.year) filter.year = opts.year;
+
+        const Salary = (await import('../models/salary.model')).default;
+        const records = await Salary.find(filter).lean();
+        let pendingCount = 0, paidCount = 0, holdCount = 0;
+        let totalNetAmount = 0, totalPendingAmount = 0, totalPaidAmount = 0;
+        for (const r of records as any[]) {
+            totalNetAmount += r.netSalary || 0;
+            if (r.status === 'paid') { paidCount++; totalPaidAmount += r.netSalary || 0; }
+            else if (r.status === 'hold') { holdCount++; totalPendingAmount += r.netSalary || 0; }
+            else { pendingCount++; totalPendingAmount += r.netSalary || 0; }
+        }
+        return { totalRecords: records.length, pendingCount, paidCount, holdCount, totalNetAmount, totalPendingAmount, totalPaidAmount };
+    }
+
+    /**
      * Get active salary structure for a staff member
      */
     async getSalaryStructure(

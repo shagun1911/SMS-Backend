@@ -10,9 +10,20 @@ import { UserRole } from '../types';
 
 const router = Router();
 
-router.use(protect, multitenant); // Global middlewares
+router.use(protect, multitenant);
 
-// Check Generation Ability (Usually HR logic, but reusing Admin/Accountant here)
+router.get(
+    '/',
+    authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    SalaryController.listSalaries
+);
+
+router.get(
+    '/summary',
+    authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    SalaryController.getSummary
+);
+
 router.post(
     '/generate',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN),

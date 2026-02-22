@@ -286,17 +286,105 @@ export async function processAIQuery(schoolId: string, message: string): Promise
 
     if (intent.type === 'system_help') {
         const guide = `
-System help (SSMS):
-- To create session: Go to Dashboard → Sessions → Add New. Fill start date, end date, session year. Save.
-- To create class: Go to Classes → Add Class & Section. Each class + section (e.g. 4 A, 4 B) is a separate entry.
-- To add student: Go to Students → Add Student. Fill admission and personal details.
-- To collect fee: Go to Collect Fee → Select student → Enter amount and payment mode.
-- To view receipts: Go to Receipts. You can Preview/Download/Print.
-- To generate report: Use Dashboard for overview; Fee Structure and Defaulters for fee reports.
-- Timetable: Timetable → Settings (set periods) → Timetable grid (fill subjects/teachers) → Save/Print.
-- Admit cards: Exams → Select exam → Admit Cards → Generate by class/section → Preview/Download/Print.
+COMPLETE SYSTEM GUIDE — School Management System (SMS)
+
+=== DASHBOARD ===
+- School Dashboard: Shows total students, total fees collected, pending dues, recent activity.
+- Master Dashboard (Super Admin only): Shows total schools, active subscriptions, billing overview.
+
+=== SESSIONS ===
+- Go to Sessions → Add New Session.
+- Fill: Session Year (e.g. 2025-2026), Start Date, End Date. Only ONE session can be active.
+- Active session determines which fee structures, exams, and data is current.
+
+=== CLASSES & SECTIONS ===
+- Go to Classes → Add Class & Section.
+- Each class + section is a SEPARATE entry (e.g. Class 4 Section A, Class 4 Section B).
+- You can set Room Number and Capacity (both optional).
+- Click "View Students" to see students in that class. Click a student to see their full profile.
+- To edit/delete a class, use the edit/delete icons on the class card.
+
+=== STUDENTS ===
+- Add Student: Go to Students → Add Student button. Fill all required fields.
+  Required: First Name, Last Name, Father's Name, Mother's Name, Date of Birth, Gender, Class, Section, Phone, Address.
+  Optional: Email, Photo, Initial Deposit Amount, Payment Mode.
+- Edit Student: Click the edit (pencil) icon on any student row in the Students list.
+- Delete Student: Click the trash icon. This will ask for confirmation.
+- Import CSV: Click "Import CSV" to bulk import students from a CSV file.
+  CSV headers: firstname, lastname, fathername, mothername, class, section, phone, gender, address, city, state, pincode, dob
+- Export CSV: Click "Export CSV" to download all students.
+- Search: Use the search bar to find students by name or admission number.
+
+=== FEE MANAGEMENT ===
+- Fee Structure: Go to Fee Structure → Create structure for each class/session.
+  Add components (Tuition, Lab, Library, etc.) with amounts. Total is calculated automatically.
+- Collect Fee: Go to Collect Fee → Search/select student → Enter amount, payment mode (Cash/UPI/Online/Cheque/Bank), reference number.
+- Receipts: Go to Receipts → View, Preview, Download, or Print any receipt.
+- Defaulters: Go to Defaulters → See all students with pending dues. Sorted by class.
+
+=== EXAMS ===
+- Create Exam: Go to Exams → New Exam. Fill title, type (Unit Test/Mid Term/Final/Other), dates, and select classes.
+- Enter Marks: Click "Enter Marks" on any exam → Select class → Add subjects (name + max marks) → Enter obtained marks for each student → Save.
+- View Results: Click "View Results" on an exam to see all student results with percentage and grade.
+- Merit List: Auto-generated when results are saved. Ranked by percentage.
+- Admit Cards: Select exam → Admit Cards → Filter by class/section → Preview/Download/Print PDF.
+
+=== STAFF & PAYROLL ===
+- Staff: Go to Staff → Add Staff (name, role, email, phone, salary).
+- Staff Detail: Click on a staff member to see their salary structure, payment history, bonuses/adjustments.
+- Salary Structure: Set base salary, add allowances (HRA, DA, etc.) and deductions (PF, TDS, etc.).
+- Payroll: Go to Payroll → Select month/year → Generate Payroll → Review → Pay each staff member.
+  Payment modes: Cash, UPI, Online, Cheque, Bank Transfer. Can add transaction ID and remarks.
+- Salary Slip: Click the eye icon on any payroll record to view/print salary slip as PDF.
+
+=== TRANSPORT ===
+- Go to Transport → Add Bus (number, route, driver, capacity).
+- Assign students to buses from their profile or the transport page.
+
+=== TIMETABLE ===
+- Settings: Go to Timetable → Settings → Configure period timings (start/end time for each period).
+- Grid: Timetable → Select class/section → Fill subject and teacher for each period/day.
+- Save/Print: Save the timetable, then print or download as PDF.
+
+=== NOTIFICATIONS ===
+- Send SMS: Go to Notifications → Send SMS tab.
+  Select target: All Students, Fee Defaulters, or Custom Selection.
+  Use templates or write custom message. Dynamic variables work:
+  {name} = student name, {amount} = due amount, {school} = school name, {date} = today, {class} = class, {fatherName} = father name
+  Preview before sending. Character counter shows SMS segments.
+- Send Email: Go to Notifications → Send Email tab.
+  First connect Gmail (click "Sign in with Google"). Then compose subject + body.
+  Same dynamic variables work in email too.
+  Supports basic HTML formatting.
+- History: View all sent notifications with delivery stats.
+
+=== AI ASSISTANT (This is me!) ===
+- Ask about any student: "Tell me about Shagun class 4"
+- Ask about fees: "Class 3 fee structure", "Fee defaulters"
+- Ask about performance: "Shagun marks", "performance summary"
+- Ask about teachers: "Teacher Rahul details"
+- Ask for help: "How to create session", "How to add student", "How to collect fee"
+- I support Hindi, English, and mixed language.
+
+=== PLAN & BILLING ===
+- Go to Plan & Billing to see current plan, features, and upgrade options.
+- Payments are processed via PhonePe.
+
+=== SETTINGS ===
+- School Identity: Update school name, email, address.
+- Notification preferences for SMS and Email alerts.
+
+=== COMMON ERRORS & SOLUTIONS ===
+- "No active session": Create a session first in Sessions page. Only one can be active.
+- "Student not found": Check the name spelling or try with admission number.
+- "Fee structure not found": Create fee structure for the class in Fee Structure page.
+- "Class not found": Create the class first in Classes page.
+- Marks not saving: Make sure you selected a class, added subjects, and entered marks. Click Save.
+- Gmail not working: Check that GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI are set. Click Connect Gmail.
+- SMS not sending: Check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER are set correctly.
+- Payment failed: Check PhonePe credentials in server .env. For sandbox, use PHONEPE_ENV=sandbox.
 `;
-        const prompt = `User asked: "${message}"\n\nUsing ONLY the following system guide, answer step-by-step. If the question is not covered, say you can only help with the listed features.\n\n${guide}`;
+        const prompt = `User asked: "${message}"\n\nUsing the following COMPREHENSIVE system guide, answer thoroughly step-by-step. Be specific about which page to go to, which buttons to click, and what to fill. If they have an error, diagnose it using the common errors section.\n\n${guide}`;
         return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 

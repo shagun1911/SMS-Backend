@@ -4,6 +4,35 @@ import SalaryService from '../services/salary.service';
 import { sendResponse } from '../utils/response';
 
 class SalaryController {
+    /** GET /salaries?month=April&year=2025&status=pending – school-wide payroll list */
+    async listSalaries(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { month, year, status } = req.query;
+            const records = await SalaryService.listSchoolSalaries(req.schoolId!, {
+                month: month as string | undefined,
+                year: year ? Number(year) : undefined,
+                status: status as string | undefined,
+            });
+            sendResponse(res, records, 'Payroll list', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** GET /salaries/summary?month=April&year=2025 – payroll summary cards */
+    async getSummary(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { month, year } = req.query;
+            const summary = await SalaryService.getPayrollSummary(req.schoolId!, {
+                month: month as string | undefined,
+                year: year ? Number(year) : undefined,
+            });
+            sendResponse(res, summary, 'Payroll summary', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
     // GENERATE Monthly Salaries
     async generateSalaries(req: AuthRequest, res: Response, next: NextFunction) {
         try {

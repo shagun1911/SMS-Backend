@@ -16,6 +16,7 @@ import classRoutes from './class.routes';
 import timetableRoutes from './timetable.routes';
 import aiRoutes from './ai.routes';
 import paymentRoutes from './payment.routes';
+import notificationRoutes from './notification.routes';
 
 const router = Router();
 
@@ -37,5 +38,6 @@ router.use('/timetable', timetableRoutes);
 
 router.use('/ai', aiRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/notifications', notificationRoutes);
 
 export default router;
