@@ -235,7 +235,8 @@ export async function phonepeWebhook(req: Request, res: Response, next: NextFunc
         if (event) {
             console.log('[PhonePe Webhook]', event, state || '');
         }
-        if ((event === 'pg.order.completed' || state === 'COMPLETED') && body.payload) {
+        const orderCompleted = event === 'checkout.order.completed' || event === 'pg.order.completed' || state === 'COMPLETED';
+        if (orderCompleted && body.payload) {
             const meta = body.payload.metaInfo || {};
             const schoolId = meta.udf1;
             const planId = meta.udf2;
