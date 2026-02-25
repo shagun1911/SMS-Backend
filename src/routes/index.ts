@@ -17,6 +17,8 @@ import timetableRoutes from './timetable.routes';
 import aiRoutes from './ai.routes';
 import paymentRoutes from './payment.routes';
 import notificationRoutes from './notification.routes';
+import announcementRoutes from './announcement.routes';
+import supportRoutes from './support.routes';
 
 const router = Router();
 
@@ -39,5 +41,7 @@ router.use('/timetable', timetableRoutes);
 router.use('/ai', aiRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/announcements', announcementRoutes);
+router.use('/support', supportRoutes);
 
 export default router;

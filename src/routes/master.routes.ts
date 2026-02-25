@@ -11,6 +11,7 @@ router.use(authorize(UserRole.SUPER_ADMIN));
 router.get('/dashboard', MasterController.getDashboard);
 router.get('/schools', MasterController.getSchools);
 router.patch('/schools/:id', MasterController.updateSchool);
+router.post('/schools/bulk-action', MasterController.bulkAction);
 
 router.get('/plans', MasterController.getPlans);
 router.post('/plans', MasterController.createPlan);
@@ -22,5 +23,12 @@ router.put('/subscription/:schoolId', MasterController.putSubscription);
 
 router.get('/usage-reports', MasterController.getUsageReports);
 router.get('/billing-overview', MasterController.getBillingOverview);
+
+router.get('/announcements', MasterController.getAnnouncements);
+router.post('/announcements', MasterController.createAnnouncement);
+router.delete('/announcements/:id', MasterController.deleteAnnouncement);
+
+router.get('/support', MasterController.getSupportTickets);
+router.patch('/support/:id', MasterController.updateSupportTicket);
 
 export default router;

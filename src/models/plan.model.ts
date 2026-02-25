@@ -22,6 +22,8 @@ export interface IPlan {
     /** Stripe Price ID for yearly (optional) */
     stripePriceIdYearly?: string;
     isDefault?: boolean;
+    /** Number of days for free trial (0 = no trial). */
+    trialDays?: number;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -42,6 +44,7 @@ const planSchema = new Schema<IPlan, IPlanModel>(
         stripePriceIdMonthly: { type: String, trim: true },
         stripePriceIdYearly: { type: String, trim: true },
         isDefault: { type: Boolean, default: false },
+        trialDays: { type: Number, default: 0 },
     },
     { timestamps: true }
 );
