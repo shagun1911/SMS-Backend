@@ -203,6 +203,32 @@ class StudentController {
     }
 
     /**
+     * Admin: set/reset student password
+     * POST /students/:id/set-password
+     */
+    async setStudentPassword(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { password } = req.body;
+            if (!password || password.length < 6) {
+                return next(new ErrorResponse('Password must be at least 6 characters', 400));
+            }
+            const student = await Student.findOne({ _id: req.params.id, schoolId: req.schoolId });
+            if (!student) return next(new ErrorResponse('Student not found', 404));
+
+            (student as any).password = password;
+            (student as any).mustChangePassword = true;
+            await (student as any).save({ validateBeforeSave: false });
+
+            sendResponse(res, {
+                admissionNumber: student.admissionNumber,
+                mustChangePassword: true,
+            }, 'Password updated. Student must change it on next login.', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
      * Generate Student ID Card PDF
      */
     async getIdCardPdf(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {

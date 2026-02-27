@@ -80,14 +80,26 @@ class ExamController {
                 return next(new ErrorResponse('Exam not found', 404));
             }
 
+            const toNum = (v: any): number => {
+                if (typeof v === 'number' && !Number.isNaN(v)) return Math.max(0, v);
+                const n = parseFloat(String(v).replace(/[^0-9.-]/g, ''));
+                return Number.isNaN(n) ? 0 : Math.max(0, n);
+            };
+
             const createdResults = [];
             for (const resultData of results) {
                 const student = await Student.findOne({ _id: resultData.studentId, schoolId: req.schoolId });
                 if (!student) continue;
 
-                const totalMarks = resultData.subjects.reduce((sum: number, s: any) => sum + s.maxMarks, 0);
-                const totalObtained = resultData.subjects.reduce((sum: number, s: any) => sum + s.obtainedMarks, 0);
-                const percentage = (totalObtained / totalMarks) * 100;
+                const normalizedSubjects = (resultData.subjects || []).map((s: any) => ({
+                    subject: s.subject || '',
+                    maxMarks: toNum(s.maxMarks),
+                    obtainedMarks: toNum(s.obtainedMarks),
+                }));
+
+                const totalMarks = normalizedSubjects.reduce((sum: number, s: any) => sum + s.maxMarks, 0);
+                const totalObtained = normalizedSubjects.reduce((sum: number, s: any) => sum + s.obtainedMarks, 0);
+                const percentage = totalMarks > 0 ? (totalObtained / totalMarks) * 100 : 0;
                 const grade = calculateGrade(percentage);
 
                 const result = await ExamResult.findOneAndUpdate(
@@ -98,7 +110,7 @@ class ExamController {
                         studentId: resultData.studentId,
                         class: student.class,
                         section: student.section,
-                        subjects: resultData.subjects,
+                        subjects: normalizedSubjects,
                         totalMarks,
                         totalObtained,
                         percentage,
@@ -301,6 +313,23 @@ class ExamController {
             res.send(buffer);
         } catch (error) {
             return next(error);
+        }
+    }
+
+    /** GET /exams/student/results — student sees their own results (protectStudent) */
+    async getStudentResults(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const student = req.student!;
+            const results = await ExamResult.find({
+                schoolId: student.schoolId,
+                studentId: student._id,
+            })
+                .populate('examId', 'title type startDate')
+                .sort({ createdAt: -1 })
+                .lean();
+            return sendResponse(res, results, 'Student results', 200);
+        } catch (error) {
+            next(error);
         }
     }
 

@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
+import axios from 'axios';
 import School from '../models/school.model';
 import Plan, { PLAN_FEATURE_KEYS } from '../models/plan.model';
 import SchoolSubscription from '../models/schoolSubscription.model';
@@ -7,6 +9,7 @@ import SupportTicket from '../models/supportTicket.model';
 import Usage from '../models/usage.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
+import config from '../config';
 
 export class MasterController {
     /** GET /master/dashboard – clean SaaS dashboard */
@@ -501,6 +504,160 @@ export class MasterController {
         } catch (error) {
             next(error);
         }
+    }
+
+    /** GET /master/system-health – full technology stack health analytics */
+    async getSystemHealth(_req: Request, res: Response, _next: NextFunction) {
+        const results: Record<string, any> = {};
+
+        // ── 1. MongoDB stats ─────────────────────────────────────────────
+        try {
+            const db = mongoose.connection.db!;
+            const dbStats: any = await db.command({ dbStats: 1, scale: 1024 * 1024 }); // MB
+            const collections = await db.listCollections().toArray();
+            const colStats = await Promise.all(
+                collections.map(async (col) => {
+                    try {
+                        const s: any = await db.command({ collStats: col.name, scale: 1024 });
+                        return {
+                            name: col.name,
+                            count: s.count ?? 0,
+                            sizeMB: parseFloat(((s.size ?? 0) / 1024).toFixed(2)),
+                            indexSizeMB: parseFloat(((s.totalIndexSize ?? 0) / 1024).toFixed(2)),
+                        };
+                    } catch {
+                        return { name: col.name, count: 0, sizeMB: 0, indexSizeMB: 0 };
+                    }
+                })
+            );
+            colStats.sort((a, b) => b.sizeMB - a.sizeMB);
+
+            const FREE_TIER_MB = 512;
+            const usedMB = parseFloat((dbStats.dataSize / 1024 || 0).toFixed(2));
+            const storageMB = parseFloat(((dbStats.dataSize + dbStats.indexSize) / 1024 || 0).toFixed(2));
+            const pct = Math.min(Math.round((storageMB / FREE_TIER_MB) * 100), 100);
+
+            results.mongodb = {
+                status: 'ok',
+                usedMB,
+                storageMB,
+                freeTierLimitMB: FREE_TIER_MB,
+                percentUsed: pct,
+                warningLevel: pct >= 90 ? 'critical' : pct >= 75 ? 'warning' : 'ok',
+                collections: colStats,
+                totalCollections: colStats.length,
+                objects: dbStats.objects ?? 0,
+                estimatedDocCount: colStats.reduce((s: number, c: any) => s + c.count, 0),
+                projectedFullAtSchools: storageMB > 0
+                    ? Math.floor(FREE_TIER_MB / (storageMB / Math.max(1, (await School.countDocuments()))))
+                    : null,
+            };
+        } catch (err: any) {
+            results.mongodb = { status: 'error', message: err.message };
+        }
+
+        // ── 2. Cloudinary ────────────────────────────────────────────────
+        const cloudAccounts = config.cloudinary.accounts;
+        results.cloudinary = await Promise.all(
+            cloudAccounts.map(async (acc, idx) => {
+                try {
+                    const res = await axios.get('https://api.cloudinary.com/v1_1/' + acc.cloudName + '/usage', {
+                        auth: { username: acc.apiKey, password: acc.apiSecret },
+                        timeout: 8000,
+                    });
+                    const d = res.data;
+                    const usedGB = parseFloat(((d.storage?.usage ?? 0) / 1073741824).toFixed(3));
+                    const limitGB = parseFloat(((d.storage?.limit ?? 25 * 1073741824) / 1073741824).toFixed(1));
+                    const pct = Math.round((usedGB / limitGB) * 100);
+                    return {
+                        account: idx + 1,
+                        cloudName: acc.cloudName,
+                        status: 'ok',
+                        storageUsedGB: usedGB,
+                        storageLimitGB: limitGB,
+                        percentUsed: pct,
+                        warningLevel: pct >= 90 ? 'critical' : pct >= 75 ? 'warning' : 'ok',
+                        bandwidthUsedGB: parseFloat(((d.bandwidth?.usage ?? 0) / 1073741824).toFixed(3)),
+                        bandwidthLimitGB: parseFloat(((d.bandwidth?.limit ?? 0) / 1073741824).toFixed(1)),
+                        transformations: d.transformations?.usage ?? 0,
+                        requests: d.requests ?? 0,
+                        resources: d.resources ?? 0,
+                        derivedResources: d.derived_resources ?? 0,
+                        plan: d.plan ?? 'Free',
+                        lastUpdated: new Date().toISOString(),
+                    };
+                } catch (err: any) {
+                    return {
+                        account: idx + 1,
+                        cloudName: acc.cloudName,
+                        status: 'error',
+                        message: err.response?.data?.error?.message ?? err.message,
+                    };
+                }
+            })
+        );
+
+        // ── 3. Groq ──────────────────────────────────────────────────────
+        try {
+            const groqRes = await axios.get('https://api.groq.com/openai/v1/models', {
+                headers: { Authorization: `Bearer ${config.groq.apiKey}` },
+                timeout: 6000,
+            });
+            const models = (groqRes.data?.data ?? []).map((m: any) => m.id);
+            results.groq = {
+                status: 'ok',
+                activeModel: config.groq.model,
+                modelAvailable: models.includes(config.groq.model),
+                availableModels: models.filter((m: string) => m.includes('llama') || m.includes('mixtral') || m.includes('gemma')),
+                note: 'Groq free tier: 14,400 req/day, 500,000 tokens/day (resets daily at midnight UTC)',
+                dailyReqLimit: 14400,
+                dailyTokenLimit: 500000,
+                resetSchedule: 'Daily at 00:00 UTC',
+            };
+        } catch (err: any) {
+            results.groq = {
+                status: err.response?.status === 401 ? 'invalid_key' : 'error',
+                message: err.response?.data?.error?.message ?? err.message,
+            };
+        }
+
+        // ── 4. Gemini ────────────────────────────────────────────────────
+        try {
+            const geminiRes = await axios.get(
+                `https://generativelanguage.googleapis.com/v1beta/models?key=${config.gemini.apiKey}`,
+                { timeout: 6000 }
+            );
+            const models = (geminiRes.data?.models ?? []).map((m: any) => m.name.replace('models/', ''));
+            results.gemini = {
+                status: 'ok',
+                activeModel: config.gemini.model,
+                modelAvailable: models.some((m: string) => m.includes(config.gemini.model)),
+                note: 'Gemini free tier: 15 req/min, 1500 req/day, 1M tokens/min (resets daily)',
+                dailyReqLimit: 1500,
+                reqPerMinLimit: 15,
+                resetSchedule: 'Daily at 00:00 Pacific Time',
+            };
+        } catch (err: any) {
+            results.gemini = {
+                status: err.response?.status === 400 || err.response?.status === 403 ? 'invalid_key' : 'error',
+                message: err.response?.data?.error?.message ?? err.message,
+            };
+        }
+
+        // ── 5. Overall summary ───────────────────────────────────────────
+        const allOk = [
+            results.mongodb?.status,
+            results.groq?.status,
+            results.gemini?.status,
+            ...(results.cloudinary ?? []).map((c: any) => c.status),
+        ].every((s) => s === 'ok');
+
+        results.summary = {
+            overallStatus: allOk ? 'healthy' : 'degraded',
+            checkedAt: new Date().toISOString(),
+        };
+
+        return sendResponse(res, results, 'System health', 200);
     }
 
     /** PATCH /master/support/:id – update status, resolution */

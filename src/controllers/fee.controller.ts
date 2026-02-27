@@ -100,6 +100,30 @@ class FeeController {
         }
     }
 
+    // GET Student self-serve fee info (student JWT)
+    async getStudentFeesForStudent(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const student = req.student!;
+            // Get fee ledger (payment history)
+            let payments: any[] = [];
+            try {
+                const ledger = await FeeService.getStudentLedger(student.schoolId.toString(), student._id.toString());
+                payments = ledger ?? [];
+            } catch (_) {
+                // Session may not be active — silently return empty
+            }
+            const data = {
+                totalYearlyFee: (student as any).totalYearlyFee ?? 0,
+                paidAmount: (student as any).paidAmount ?? 0,
+                dueAmount: (student as any).dueAmount ?? 0,
+                payments,
+            };
+            sendResponse(res, data, 'Student fee summary', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
     // GET Fee stats (summary for dashboard)
     async getFeeStats(req: AuthRequest, res: Response, next: NextFunction) {
         try {

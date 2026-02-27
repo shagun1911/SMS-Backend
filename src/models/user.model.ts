@@ -76,6 +76,15 @@ const userSchema = new Schema<IUser, IUserModel>(
             type: Date,
             default: null,
         },
+        mustChangePassword: {
+            type: Boolean,
+            default: false,
+        },
+        /** Teacher-only: granted by school admin. e.g. edit_timetable, manage_announcements, view_transport */
+        permissions: {
+            type: [String],
+            default: [],
+        },
         refreshToken: {
             type: String,
             select: false,

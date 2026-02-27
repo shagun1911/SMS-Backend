@@ -18,4 +18,6 @@ router.route('/:id')
     .put(UserController.updateUser)
     .delete(UserController.deleteUser);
 
+router.post('/:id/set-password', UserController.setPassword);
+
 export default router;

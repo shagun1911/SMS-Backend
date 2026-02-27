@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { protect, authorize, multitenant } from '../middleware/auth.middleware';
+import { protect, protectStudent, authorize, multitenant } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import {
     createFeeStructureSchema,
@@ -12,6 +12,9 @@ import FeeController from '../controllers/fee.controller';
 import { UserRole } from '../types';
 
 const router = Router();
+
+// Student self-serve fee endpoint (uses student JWT)
+router.get('/student/me', protectStudent, FeeController.getStudentFeesForStudent);
 
 router.use(protect, multitenant); // Global middlewares
 

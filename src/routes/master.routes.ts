@@ -31,4 +31,6 @@ router.delete('/announcements/:id', MasterController.deleteAnnouncement);
 router.get('/support', MasterController.getSupportTickets);
 router.patch('/support/:id', MasterController.updateSupportTicket);
 
+router.get('/system-health', MasterController.getSystemHealth);
+
 export default router;

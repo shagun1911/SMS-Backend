@@ -35,9 +35,13 @@ export interface IUser extends Document {
     };
     isActive: boolean;
     lastLogin?: Date;
+    mustChangePassword?: boolean;
+    /** Teacher permissions granted by school admin: edit_timetable, manage_announcements, view_transport */
+    permissions?: string[];
     refreshToken?: string;
     createdAt: Date;
     updatedAt: Date;
+    matchPassword(enteredPassword: string): Promise<boolean>;
 }
 
 export interface IAuthTokens {
@@ -58,6 +62,7 @@ export interface ITokenPayload {
 
 export interface AuthRequest extends Request {
     user?: IUser;
+    student?: IStudent;
     schoolId?: string;
 }
 
@@ -188,8 +193,15 @@ export interface IStudent extends Document {
     initialDepositAmount?: number;
     depositPaymentMode?: string;
     depositDate?: Date;
+    // Auth fields
+    password?: string;
+    mustChangePassword?: boolean;
+    lastLogin?: Date;
     createdAt: Date;
     updatedAt: Date;
+    // Methods
+    matchPassword(enteredPassword: string): Promise<boolean>;
+    getSignedJwtToken(): string;
 }
 
 // ============================================

@@ -24,6 +24,16 @@ class StudentService {
 
         const admissionNumber = await this.generateAdmissionNumber(schoolId, school.schoolCode);
 
+        // Default password = DOB as DDMMYYYY (e.g. 15082010)
+        let defaultPassword = admissionNumber; // fallback
+        if (studentData.dateOfBirth) {
+            const dob = new Date(studentData.dateOfBirth);
+            const dd = String(dob.getDate()).padStart(2, '0');
+            const mm = String(dob.getMonth() + 1).padStart(2, '0');
+            const yyyy = dob.getFullYear();
+            defaultPassword = `${dd}${mm}${yyyy}`;
+        }
+
         const student = await StudentRepository.create({
             ...studentData,
             schoolId: school._id,
@@ -31,7 +41,9 @@ class StudentService {
             admissionNumber,
             status: StudentStatus.ACTIVE,
             isActive: true,
-        });
+            password: defaultPassword,
+            mustChangePassword: true,
+        } as any);
 
         await updateUsageForSchool(schoolId);
         return student;

@@ -1,4 +1,7 @@
 import { Schema, model, Model } from 'mongoose';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import config from '../config';
 import { IStudent, Gender, BloodGroup, StudentStatus } from '../types';
 
 interface IStudentModel extends Model<IStudent> { }
@@ -145,6 +148,10 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         initialDepositAmount: { type: Number, default: 0 },
         depositPaymentMode: { type: String, trim: true },
         depositDate: { type: Date },
+        // Auth fields
+        password: { type: String, select: false },
+        mustChangePassword: { type: Boolean, default: true },
+        lastLogin: { type: Date, default: null },
     },
     {
         timestamps: true,
@@ -165,6 +172,29 @@ studentSchema.index({ schoolId: 1, status: 1 });
 studentSchema.virtual('fullName').get(function () {
     return `${this.firstName} ${this.lastName}`;
 });
+
+// Hash password before save
+studentSchema.pre('save', async function (next) {
+    if (!this.isModified('password') || !this.password) return next();
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+});
+
+// Compare entered password with hashed password
+studentSchema.methods.matchPassword = async function (enteredPassword: string): Promise<boolean> {
+    if (!this.password) return false;
+    return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// Generate JWT for student — userType='student' distinguishes from staff tokens
+studentSchema.methods.getSignedJwtToken = function (): string {
+    return jwt.sign(
+        { id: this._id.toString(), role: 'student', schoolId: this.schoolId?.toString(), userType: 'student' },
+        config.jwt.accessSecret as any,
+        { expiresIn: config.jwt.accessExpire as any }
+    );
+};
 
 const Student = model<IStudent, IStudentModel>('Student', studentSchema);
 

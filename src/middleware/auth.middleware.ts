@@ -1,12 +1,13 @@
 import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model';
+import Student from '../models/student.model';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 import config from '../config';
 
 /**
- * Protect routes - Verify JWT token
+ * Protect routes - Verify JWT token (staff only)
  */
 export const protect = async (req: AuthRequest, _res: Response, next: NextFunction) => {
     let token;
@@ -15,17 +16,14 @@ export const protect = async (req: AuthRequest, _res: Response, next: NextFuncti
         req.headers.authorization &&
         req.headers.authorization.startsWith('Bearer')
     ) {
-        // Set token from Bearer token in header
         token = req.headers.authorization.split(' ')[1];
     }
 
-    // Make sure token exists
     if (!token) {
         return next(new ErrorResponse('Not authorized to access this route', 401));
     }
 
     try {
-        // Verify token
         const decoded: any = jwt.verify(token, config.jwt.accessSecret);
 
         const user = await User.findById(decoded.id);
@@ -35,6 +33,40 @@ export const protect = async (req: AuthRequest, _res: Response, next: NextFuncti
         }
 
         req.user = user;
+        next();
+    } catch (err) {
+        return next(new ErrorResponse('Not authorized to access this route', 401));
+    }
+};
+
+/**
+ * Protect routes - Verify JWT token (student only)
+ */
+export const protectStudent = async (req: AuthRequest, _res: Response, next: NextFunction) => {
+    let token;
+
+    if (req.headers.authorization?.startsWith('Bearer')) {
+        token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (!token) {
+        return next(new ErrorResponse('Not authorized to access this route', 401));
+    }
+
+    try {
+        const decoded: any = jwt.verify(token, config.jwt.accessSecret);
+
+        if (decoded.userType !== 'student') {
+            return next(new ErrorResponse('This route is for students only', 403));
+        }
+
+        const student = await Student.findById(decoded.id);
+        if (!student || !student.isActive) {
+            return next(new ErrorResponse('Student not found or inactive', 404));
+        }
+
+        req.student = student;
+        req.schoolId = student.schoolId.toString();
         next();
     } catch (err) {
         return next(new ErrorResponse('Not authorized to access this route', 401));
@@ -60,6 +92,54 @@ export const authorize = (...roles: UserRole[]) => {
         }
         next();
     };
+};
+
+/** Permission keys that school admin can grant to teachers */
+export const TEACHER_PERMISSIONS = {
+    EDIT_TIMETABLE: 'edit_timetable',
+    MANAGE_ANNOUNCEMENTS: 'manage_announcements',
+    VIEW_TRANSPORT: 'view_transport',
+} as const;
+
+/**
+ * Allow SCHOOL_ADMIN, SUPER_ADMIN, or TEACHER with the given permission.
+ * Use for routes that teachers can access only if granted (e.g. edit timetable, view bus routes).
+ */
+export const requirePermission = (permission: string) => {
+    return (req: AuthRequest, _res: Response, next: NextFunction) => {
+        if (!req.user) {
+            return next(new ErrorResponse('Not authorized', 401));
+        }
+        const role = req.user.role as UserRole;
+        const perms = (req.user as any).permissions || [];
+
+        if (role === UserRole.SUPER_ADMIN || role === UserRole.SCHOOL_ADMIN) {
+            return next();
+        }
+        if (role === UserRole.TEACHER && Array.isArray(perms) && perms.includes(permission)) {
+            return next();
+        }
+        return next(new ErrorResponse('You do not have permission for this action', 403));
+    };
+};
+
+/**
+ * Allow SCHOOL_ADMIN, SUPER_ADMIN, TRANSPORT_MANAGER, or TEACHER with view_transport.
+ * Use for transport (bus routes) read access.
+ */
+export const requireTransportView = (req: AuthRequest, _res: Response, next: NextFunction) => {
+    if (!req.user) {
+        return next(new ErrorResponse('Not authorized', 401));
+    }
+    const role = req.user.role as UserRole;
+    const perms = (req.user as any).permissions || [];
+    if (role === UserRole.SUPER_ADMIN || role === UserRole.SCHOOL_ADMIN || role === UserRole.TRANSPORT_MANAGER) {
+        return next();
+    }
+    if (role === UserRole.TEACHER && Array.isArray(perms) && perms.includes(TEACHER_PERMISSIONS.VIEW_TRANSPORT)) {
+        return next();
+    }
+    return next(new ErrorResponse('You do not have permission to view transport', 403));
 };
 
 /**

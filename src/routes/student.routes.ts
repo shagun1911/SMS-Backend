@@ -41,6 +41,12 @@ router.get(
     StudentController.getIdCardPdf
 );
 
+router.post(
+    '/:id/set-password',
+    authorize(UserRole.SCHOOL_ADMIN),
+    StudentController.setStudentPassword
+);
+
 router
     .route('/:id')
     .get(StudentController.getStudent)

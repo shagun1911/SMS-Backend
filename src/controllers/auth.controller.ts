@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import AuthService from '../services/auth.service';
 import User from '../models/user.model';
 import ErrorResponse from '../utils/errorResponse';
-import { UserRole } from '../types';
+import { AuthRequest, UserRole } from '../types';
 
 class AuthController {
     /**
@@ -63,10 +63,12 @@ class AuthController {
                 return next(new ErrorResponse('Unauthorized: Master Admins must use the Control Center', 403));
             }
 
-            // Determine redirect path based on role
+            // Determine redirect path based on role/portal
             let redirectTo = '/school/dashboard';
             if (user.role === UserRole.SUPER_ADMIN) {
                 redirectTo = '/master/dashboard';
+            } else if (user.role === UserRole.TEACHER || portal === 'teacher') {
+                redirectTo = '/teacher/dashboard';
             }
 
             res.status(200).json({
@@ -75,12 +77,15 @@ class AuthController {
                 refreshToken: tokens.refreshToken,
                 role: user.role,
                 redirectTo,
+                mustChangePassword: (user as any).mustChangePassword === true,
                 user: {
                     _id: user._id,
                     name: user.name,
                     email: user.email,
                     role: user.role,
-                    schoolId: user.schoolId
+                    schoolId: user.schoolId,
+                    mustChangePassword: (user as any).mustChangePassword === true,
+                    permissions: (user as any).permissions || [],
                 },
             });
         } catch (error) {
@@ -114,6 +119,42 @@ class AuthController {
             res.status(200).json({
                 success: true,
                 data: {},
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Change password (logged-in user: teacher, school admin, etc.)
+     */
+    async changePassword(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { currentPassword, newPassword } = req.body;
+            if (!currentPassword || !newPassword) {
+                return next(new ErrorResponse('Please provide current password and new password', 400));
+            }
+            if (newPassword.length < 6) {
+                return next(new ErrorResponse('New password must be at least 6 characters', 400));
+            }
+
+            const user = await User.findById((req as any).user.id).select('+password');
+            if (!user) {
+                return next(new ErrorResponse('User not found', 404));
+            }
+
+            const isMatch = await (user as any).matchPassword(currentPassword);
+            if (!isMatch) {
+                return next(new ErrorResponse('Current password is incorrect', 401));
+            }
+
+            user.password = newPassword;
+            (user as any).mustChangePassword = false;
+            await user.save();
+
+            res.status(200).json({
+                success: true,
+                message: 'Password updated successfully',
             });
         } catch (error) {
             next(error);

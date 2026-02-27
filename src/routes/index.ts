@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes';
+import studentAuthRoutes from './studentAuth.routes';
+import homeworkRoutes from './homework.routes';
 import studentRoutes from './student.routes';
 import feeRoutes from './fee.routes';
 import salaryRoutes from './salary.routes';
@@ -23,6 +25,8 @@ import supportRoutes from './support.routes';
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/auth/student', studentAuthRoutes);
+router.use('/homework', homeworkRoutes);
 router.use('/master', masterRoutes);
 router.use('/schools', schoolRoutes);
 router.use('/students', studentRoutes);

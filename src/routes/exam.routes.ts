@@ -1,9 +1,12 @@
 import { Router } from 'express';
-import { protect, authorize, multitenant } from '../middleware/auth.middleware';
+import { protect, protectStudent, authorize, multitenant } from '../middleware/auth.middleware';
 import ExamController from '../controllers/exam.controller';
 import { UserRole } from '../types';
 
 const router = Router();
+
+// Student self-serve results
+router.get('/student/results', protectStudent, ExamController.getStudentResults);
 
 router.use(protect, multitenant);
 
