@@ -4,8 +4,8 @@ import { generateWithGroq } from './groq';
 
 const MAX_OUTPUT_TOKENS = 1024;
 
-/** Fallback models when primary returns 429 limit:0. Order: newer/experimental first. */
-const FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.0-pro', 'gemini-pro'];
+/** Fallback models when primary returns 429/404. Only valid models here. */
+const FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
 let genAI: GoogleGenerativeAI | null = null;
 

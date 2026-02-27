@@ -6,6 +6,17 @@ import User from '../models/user.model';
 import Bus from '../models/bus.model';
 import Session from '../models/session.model';
 import { generateWithGemini } from '../utils/gemini';
+import { generateWithGroq } from '../utils/groq';
+
+/**
+ * Groq-first AI generator: tries Groq (~200ms), falls back to Gemini.
+ */
+async function generateAI(prompt: string, systemInstruction?: string): Promise<string> {
+    const groqResult = await generateWithGroq(prompt, systemInstruction);
+    if (groqResult) return groqResult;
+    console.log('[AI] Groq unavailable → falling back to Gemini');
+    return generateWithGemini(prompt, systemInstruction);
+}
 
 export type IntentType =
     | 'student_lookup'
@@ -186,7 +197,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             examResultsCount: results.length,
         };
         const prompt = `User asked: "${message}"\n\nBased on the following student data (JSON), generate a professional summary. Include: Admission & basic info, Fee summary (total, paid, due), Payment history summary, Exam/performance summary, Bus/transport (if any), and 1-2 lines on strength/weakness/trend if you can infer from data.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'teacher_lookup') {
@@ -217,7 +228,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             joiningDate: t.createdAt,
         };
         const prompt = `User asked: "${message}"\n\nBased on the following teacher/staff data (JSON), give a short professional summary.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'fee_structure_query') {
@@ -242,7 +253,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             components: (structure as any).components || [],
         };
         const prompt = `User asked: "${message}"\n\nBased on the following fee structure (JSON), answer clearly. Include total and breakdown if present.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'performance_summary' && (intent.params?.studentName || intent.params?.className)) {
@@ -266,7 +277,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             subjectsSummary: subjects,
         };
         const prompt = `User asked: "${message}"\n\nBased on the following performance data (JSON), analyze: strong subject, weak subject, trend, and suggest one or two improvements.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'defaulters') {
@@ -281,7 +292,7 @@ export async function processAIQuery(schoolId: string, message: string): Promise
             sample: (defaulters as any[]).slice(0, 10).map((d) => ({ name: `${d.firstName} ${d.lastName}`, class: d.class, due: d.dueAmount })),
         };
         const prompt = `User asked: "${message}"\n\nBased on the following defaulters/fee dues data (JSON), give a short summary: how many defaulters, total pending amount, and any note.\n\nDATA:\n${JSON.stringify(payload, null, 2)}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     if (intent.type === 'system_help') {
@@ -385,9 +396,9 @@ COMPLETE SYSTEM GUIDE — School Management System (SMS)
 - Payment failed: Check PhonePe credentials in server .env. For sandbox, use PHONEPE_ENV=sandbox.
 `;
         const prompt = `User asked: "${message}"\n\nUsing the following COMPREHENSIVE system guide, answer thoroughly step-by-step. Be specific about which page to go to, which buttons to click, and what to fill. If they have an error, diagnose it using the common errors section.\n\n${guide}`;
-        return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+        return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
     }
 
     const prompt = `User asked: "${message}"\n\nYou are a school management AI assistant. Respond briefly and helpfully. If they are asking for student/teacher/fee/performance data, suggest they try: "Shagun class 10 details" or "Class 3 fee" or "Defaulters" or "How to create session".`;
-    return await generateWithGemini(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
+    return await generateAI(prompt, `${SYSTEM_GUIDE}\n\n${langInstr}`);
 }
