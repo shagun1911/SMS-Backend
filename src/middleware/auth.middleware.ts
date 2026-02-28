@@ -6,9 +6,7 @@ import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 import config from '../config';
 
-/**
- * Protect routes - Verify JWT token (staff only)
- */
+
 export const protect = async (req: AuthRequest, _res: Response, next: NextFunction) => {
     let token;
 
