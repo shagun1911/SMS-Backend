@@ -4,7 +4,7 @@
     "description": "SMS - School Management System - Enterprise Backend",
     "main": "dist/server.js",
     "scripts": {
-        "dev": "nodemon --exec ts-node src/server.ts",
+        "dev": "NODE_OPTIONS=--max-old-space-size=4096 nodemon --watch src --ext ts,json --exec ts-node --transpile-only src/server.ts",
         "build": "tsc",
         "start": "node dist/server.js",
         "lint": "eslint . --ext .ts",

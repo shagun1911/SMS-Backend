@@ -149,12 +149,14 @@ export enum StudentStatus {
     ALUMNI = 'alumni',
     TRANSFERRED = 'transferred',
     DISCONTINUED = 'discontinued',
+    PASSED_OUT = 'passed_out',
 }
 
 export interface IStudent extends Document {
     _id: Types.ObjectId;
     schoolId: Types.ObjectId;
     admissionNumber: string;
+    username?: string;
     sessionId: Types.ObjectId;
     firstName: string;
     lastName: string;
@@ -195,6 +197,7 @@ export interface IStudent extends Document {
     depositDate?: Date;
     // Auth fields
     password?: string;
+    plainPassword?: string;
     mustChangePassword?: boolean;
     lastLogin?: Date;
     createdAt: Date;

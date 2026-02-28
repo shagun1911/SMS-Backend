@@ -8,6 +8,7 @@ import StudentFee from '../models/studentFee.model';
 import Class from '../models/class.model';
 import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
 import Plan from '../models/plan.model';
+import { Types } from 'mongoose';
 
 class SchoolController {
     /**
@@ -75,25 +76,25 @@ class SchoolController {
                 Student.countDocuments({ schoolId, isActive: true }),
                 User.countDocuments({ schoolId, isActive: true, role: { $ne: UserRole.SUPER_ADMIN } }),
                 StudentFee.aggregate([
-                    { $match: { schoolId, status: 'paid' } },
+                    { $match: { schoolId: new Types.ObjectId(schoolId), status: 'paid' } },
                     { $group: { _id: null, total: { $sum: '$paidAmount' } } }
                 ]),
                 StudentFee.aggregate([
-                    { $match: { schoolId, status: { $in: ['pending', 'partial'] } } },
+                    { $match: { schoolId: new Types.ObjectId(schoolId), status: { $in: ['pending', 'partial'] } } },
                     { $group: { _id: null, total: { $sum: '$remainingAmount' }, count: { $sum: 1 } } }
                 ]),
                 StudentFee.aggregate([
-                    { $match: { schoolId, status: 'paid' } },
+                    { $match: { schoolId: new Types.ObjectId(schoolId), status: 'paid' } },
                     { $group: { _id: '$month', total: { $sum: '$paidAmount' } } }
                 ]),
                 Class.countDocuments({ schoolId, isActive: true }),
                 Class.find({ schoolId, isActive: true }),
                 Student.aggregate([
-                    { $match: { schoolId, isActive: true } },
+                    { $match: { schoolId: new Types.ObjectId(schoolId), isActive: true } },
                     { $group: { _id: '$gender', count: { $sum: 1 } } }
                 ]),
                 StudentFee.aggregate([
-                    { $match: { schoolId } },
+                    { $match: { schoolId: new Types.ObjectId(schoolId) } },
                     {
                         $group: {
                             _id: null,
@@ -103,11 +104,20 @@ class SchoolController {
                     }
                 ])
             ]);
+
             const totalSections = classList?.length ?? 0;
-            const genderRatio = {
-                male: genderAgg?.find((g: any) => g._id === 'Male')?.count || 0,
-                female: genderAgg?.find((g: any) => g._id === 'Female')?.count || 0
-            };
+
+            // Modern, dynamic gender ratio (case-insensitive)
+            const genderRatio: Record<string, number> = {};
+            genderAgg?.forEach((g: any) => {
+                const label = g._id ? (g._id.charAt(0).toUpperCase() + g._id.slice(1).toLowerCase()) : 'Other';
+                genderRatio[label] = (genderRatio[label] || 0) + g.count;
+            });
+
+            // Ensure Male/Female at least exist for frontend compatibility if desired, 
+            // but the new dynamic chart will handle whatever is returned.
+            if (!genderRatio.Male) genderRatio.Male = 0;
+            if (!genderRatio.Female) genderRatio.Female = 0;
             const totalExpected = feeStats?.[0]?.total || 0;
             const collected = feeStats?.[0]?.collected || 0;
             const collectionRate = totalExpected > 0 ? Math.round((collected / totalExpected) * 100) : 0;

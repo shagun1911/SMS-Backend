@@ -34,14 +34,33 @@ class StudentService {
             defaultPassword = `${dd}${mm}${yyyy}`;
         }
 
+        // admissionNumber is already generated at line 25
+
+        let username = studentData.firstName?.trim().toLowerCase() || '';
+
+        // Check for siblings (same name and DOB) in the same school
+        if (studentData.firstName && studentData.dateOfBirth) {
+            const hasSibling = await Student.findOne({
+                schoolId: school._id,
+                firstName: { $regex: new RegExp(`^${studentData.firstName.trim()}$`, 'i') },
+                dateOfBirth: studentData.dateOfBirth
+            });
+
+            if (hasSibling && studentData.phone) {
+                username += studentData.phone.slice(-4);
+            }
+        }
+
         const student = await StudentRepository.create({
             ...studentData,
             schoolId: school._id,
             sessionId: activeSession._id,
             admissionNumber,
+            username,
             status: StudentStatus.ACTIVE,
             isActive: true,
             password: defaultPassword,
+            plainPassword: defaultPassword,
             mustChangePassword: true,
         } as any);
 
@@ -125,10 +144,18 @@ class StudentService {
             throw new ErrorResponse('Student not found', 404);
         }
 
-        await StudentRepository.update(id, {
-            isActive: false,
-            status: StudentStatus.DISCONTINUED,
-        });
+        // If student is in Class 12, mark as PASSED_OUT. Otherwise, delete permanently.
+        const isClass12 = ['12', 'XII', '12th'].includes(student.class);
+
+        if (isClass12) {
+            await StudentRepository.update(id, {
+                isActive: false,
+                status: StudentStatus.PASSED_OUT,
+            });
+        } else {
+            await StudentRepository.delete(id);
+        }
+
         await updateUsageForSchool(schoolId);
     }
 

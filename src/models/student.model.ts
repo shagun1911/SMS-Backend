@@ -19,6 +19,11 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             trim: true,
             uppercase: true,
         },
+        username: {
+            type: String,
+            trim: true,
+            lowercase: true,
+        },
         sessionId: {
             type: Schema.Types.ObjectId,
             ref: 'Session',
@@ -150,6 +155,7 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         depositDate: { type: Date },
         // Auth fields
         password: { type: String, select: false },
+        plainPassword: { type: String },
         mustChangePassword: { type: Boolean, default: true },
         lastLogin: { type: Date, default: null },
     },
@@ -163,6 +169,8 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
 // Indexes
 // Ensure unique admission number per school
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
+// Ensure unique username per school
+studentSchema.index({ schoolId: 1, username: 1 }, { unique: true, sparse: true });
 // Optimize class/section queries
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 // Optimize active student queries

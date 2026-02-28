@@ -113,22 +113,30 @@ class StudentController {
             for (let i = 0; i < rows.length; i++) {
                 try {
                     const row = rows[i];
+
+                    // Handle address mapping: Frontend sends nested object, backend reconstruction was wiping it
+                    const addressData = typeof row.address === 'object' ? row.address : {};
+                    const street = row.street || addressData.street || row.address || '';
+                    const city = row.city || addressData.city || '';
+                    const state = row.state || addressData.state || '';
+                    const pincode = row.pincode || addressData.pincode || '';
+
                     const student = await StudentService.createStudent(req.schoolId!, {
                         firstName: row.firstName || row.first_name,
                         lastName: row.lastName || row.last_name,
                         fatherName: row.fatherName || row.father_name || '',
                         motherName: row.motherName || row.mother_name || '',
                         dateOfBirth: row.dateOfBirth ? new Date(row.dateOfBirth) : new Date(),
-                        gender: row.gender || 'Male',
+                        gender: row.gender ? (row.gender.charAt(0).toUpperCase() + row.gender.slice(1).toLowerCase()) : 'Male',
                         class: row.class || row.className || 'I',
                         section: (row.section || 'A').toString().toUpperCase(),
                         rollNumber: row.rollNumber ?? row.roll_number,
                         phone: row.phone || row.fatherPhone || '',
                         address: {
-                            street: row.street || row.address || '',
-                            city: row.city || '',
-                            state: row.state || '',
-                            pincode: row.pincode || '',
+                            street: typeof street === 'string' ? street : (street.street || ''),
+                            city,
+                            state,
+                            pincode,
                         },
                     });
                     created.push(student);
@@ -216,11 +224,33 @@ class StudentController {
             if (!student) return next(new ErrorResponse('Student not found', 404));
 
             (student as any).password = password;
+            (student as any).plainPassword = password;
             (student as any).mustChangePassword = true;
+
+            // Ensure username is set if missing (using firstName + phone suffix only on name/DOB collision)
+            if (!(student as any).username) {
+                const firstName = (student as any).firstName.trim().toLowerCase();
+                const dateOfBirth = (student as any).dateOfBirth;
+
+                // Check if another student has SAME name and SAME DOB
+                const hasSibling = await Student.findOne({
+                    _id: { $ne: student._id },
+                    schoolId: student.schoolId,
+                    firstName: { $regex: new RegExp(`^${(student as any).firstName.trim()}$`, 'i') },
+                    dateOfBirth: dateOfBirth
+                });
+
+                (student as any).username = (hasSibling && (student as any).phone)
+                    ? firstName + (student as any).phone.slice(-4)
+                    : firstName;
+            }
+
             await (student as any).save({ validateBeforeSave: false });
 
             sendResponse(res, {
                 admissionNumber: student.admissionNumber,
+                username: student.username,
+                plainPassword: student.plainPassword,
                 mustChangePassword: true,
             }, 'Password updated. Student must change it on next login.', 200);
         } catch (error) {

@@ -14,6 +14,7 @@ import apiRoutes from './routes';
 import healthRoutes from './routes/health.routes';
 import errorHandler from './middleware/error.middleware';
 import { seedSystem } from './utils/seeder';
+import { migrateStudentUsernames } from './utils/migrations';
 import * as paymentController from './controllers/payment.controller';
 
 // Load env vars
@@ -72,8 +73,8 @@ app.use(mongoSanitize());
 function sanitizeStrings(obj: any): any {
     if (typeof obj === 'string') {
         return obj.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                  .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
-                  .replace(/javascript\s*:/gi, '');
+            .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+            .replace(/javascript\s*:/gi, '');
     }
     if (Array.isArray(obj)) return obj.map(sanitizeStrings);
     if (obj && typeof obj === 'object') {
@@ -158,8 +159,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   ╚═══════════════════════════════════════════════════════╝
   `);
     // Connect DB and seed after port is bound (so Render port scan succeeds)
-    connectDB().then(() => {
-        seedSystem();
+    connectDB().then(async () => {
+        await seedSystem();
+        await migrateStudentUsernames();
     }).catch((err) => {
         console.error('Database connection failed:', err.message);
     });

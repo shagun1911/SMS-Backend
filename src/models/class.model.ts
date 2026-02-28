@@ -7,13 +7,12 @@ export interface IClass extends Document {
     section: string;   // "A", "B", "C" – one document per (className, section)
     classTeacherId?: Types.ObjectId;
     roomNumber?: string;
-    capacity?: number;
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
 }
 
-interface IClassModel extends Model<IClass> {}
+interface IClassModel extends Model<IClass> { }
 
 const classSchema = new Schema<IClass, IClassModel>(
     {
@@ -40,10 +39,6 @@ const classSchema = new Schema<IClass, IClassModel>(
         roomNumber: {
             type: String,
             trim: true,
-        },
-        capacity: {
-            type: Number,
-            min: 0,
         },
         isActive: {
             type: Boolean,
