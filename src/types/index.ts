@@ -329,6 +329,7 @@ export interface ISession extends Document {
 
 export enum SalaryStatus {
     PENDING = 'pending',
+    PARTIAL = 'partial',
     PAID = 'paid',
     HOLD = 'hold',
 }
@@ -350,9 +351,17 @@ export interface ISalaryRecord extends Document {
     }[];
     totalSalary: number;
     netSalary: number;
+    paidAmount: number;
     status: SalaryStatus;
     paymentDate?: Date;
     paymentMode?: PaymentMode;
+    paymentHistory?: {
+        amount: number;
+        paymentDate: Date;
+        paymentMode: PaymentMode;
+        transactionId?: string;
+        remarks?: string;
+    }[];
     transactionId?: string;
     remarks?: string;
     createdAt: Date;

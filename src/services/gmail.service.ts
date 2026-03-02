@@ -38,7 +38,8 @@ export async function sendBulkEmail(
     tokens: { access_token: string; refresh_token?: string },
     recipients: { email: string; name?: string }[],
     subject: string,
-    htmlBody: string
+    htmlBody: string,
+    fromName?: string
 ): Promise<{ sent: number; failed: number; results: EmailSendResult[] }> {
     const oAuth2 = getOAuthClient();
     oAuth2.setCredentials(tokens);
@@ -52,7 +53,7 @@ export async function sendBulkEmail(
         const batch = recipients.slice(i, i + BATCH);
         const promises = batch.map(async (r) => {
             try {
-                const raw = makeRawEmail(r.email, subject, htmlBody, r.name);
+                const raw = makeRawEmail(r.email, subject, htmlBody, r.name, fromName);
                 await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
                 sent++;
                 return { email: r.email, success: true };
@@ -68,11 +69,25 @@ export async function sendBulkEmail(
     return { sent, failed, results };
 }
 
-function makeRawEmail(to: string, subject: string, html: string, toName?: string): string {
+/**
+ * Encode a header value using RFC 2047 UTF-8 Base64 encoding.
+ * Required for non-ASCII characters (e.g. ₹, –, school names with special chars) in email headers.
+ */
+function encodeHeaderValue(value: string): string {
+    // Check if encoding is needed
+    if (/^[\x00-\x7F]*$/.test(value)) return value; // pure ASCII, no encoding needed
+    const encoded = Buffer.from(value, 'utf8').toString('base64');
+    return `=?UTF-8?B?${encoded}?=`;
+}
+
+function makeRawEmail(to: string, subject: string, html: string, toName?: string, fromName?: string): string {
     const toHeader = toName ? `"${toName}" <${to}>` : to;
+    const encodedSubject = encodeHeaderValue(subject);
+    const fromHeader = fromName ? `${encodeHeaderValue(fromName)} <me>` : 'me';
     const raw = [
+        `From: ${fromHeader}`,
         `To: ${toHeader}`,
-        `Subject: ${subject}`,
+        `Subject: ${encodedSubject}`,
         'MIME-Version: 1.0',
         'Content-Type: text/html; charset=utf-8',
         '',

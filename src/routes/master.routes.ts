@@ -10,7 +10,9 @@ router.use(authorize(UserRole.SUPER_ADMIN));
 
 router.get('/dashboard', MasterController.getDashboard);
 router.get('/schools', MasterController.getSchools);
+router.get('/schools/:id', MasterController.getSchoolDetail);
 router.patch('/schools/:id', MasterController.updateSchool);
+router.patch('/schools/:id/credentials', MasterController.updateSchoolCredentials);
 router.post('/schools/bulk-action', MasterController.bulkAction);
 
 router.get('/plans', MasterController.getPlans);

@@ -7,6 +7,7 @@ import SchoolSubscription from '../models/schoolSubscription.model';
 import SystemAnnouncement from '../models/systemAnnouncement.model';
 import SupportTicket from '../models/supportTicket.model';
 import Usage from '../models/usage.model';
+import User from '../models/user.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 import config from '../config';
@@ -189,6 +190,74 @@ export class MasterController {
                 await sub.save();
             }
             return sendResponse(res, { updated: subs.length }, 'OK', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** GET /master/schools/:id – full school detail + admin user info */
+    async getSchoolDetail(req: Request, res: Response, next: NextFunction) {
+        try {
+            const school = await School.findById(req.params.id).lean();
+            if (!school) return next(new ErrorResponse('School not found', 404));
+
+            const [sub, admin] = await Promise.all([
+                SchoolSubscription.findOne({ schoolId: school._id }).populate('planId', 'name priceMonthly').lean(),
+                (school as any).adminUserId
+                    ? User.findById((school as any).adminUserId).select('name email phone role isActive lastLogin plainPassword').lean()
+                    : null,
+            ]);
+
+            return sendResponse(
+                res,
+                {
+                    school,
+                    subscription: sub ?? null,
+                    admin: admin ?? null,
+                },
+                'OK',
+                200
+            );
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** PATCH /master/schools/:id/credentials – update admin login email / password */
+    async updateSchoolCredentials(req: Request, res: Response, next: NextFunction) {
+        try {
+            const school = await School.findById(req.params.id).lean();
+            if (!school) return next(new ErrorResponse('School not found', 404));
+
+            const adminId = (school as any).adminUserId;
+            if (!adminId) return next(new ErrorResponse('No admin user linked to this school', 404));
+
+            const admin = await User.findById(adminId).select('+password');
+            if (!admin) return next(new ErrorResponse('Admin user not found', 404));
+
+            const { email, password, name, phone } = req.body;
+
+            if (name) admin.name = name;
+            if (phone) admin.phone = phone;
+            if (email && email !== admin.email) admin.email = email.toLowerCase().trim();
+            if (password) {
+                admin.password = password; // pre-save hook will hash it
+                (admin as any).plainPassword = password;
+            }
+
+            await admin.save();
+
+            return sendResponse(
+                res,
+                {
+                    _id: admin._id,
+                    name: admin.name,
+                    email: admin.email,
+                    phone: admin.phone,
+                },
+                'Credentials updated',
+                200
+            );
         } catch (error) {
             next(error);
         }

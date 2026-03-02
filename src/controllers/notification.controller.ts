@@ -195,7 +195,7 @@ class NotificationController {
                     const promises = batch.map(async (s: any, idx: number) => {
                         const personalSubject = replaceVars(subject, s, schoolName);
                         const personalBody = replaceVars(message, s, schoolName);
-                        const r = await sendBulkEmail(tokens, [recipients[idx]], personalSubject, personalBody);
+                        const r = await sendBulkEmail(tokens, [recipients[idx]], personalSubject, personalBody, schoolName);
                         sent += r.sent; failed += r.failed;
                     });
                     await Promise.all(promises);
@@ -206,7 +206,7 @@ class NotificationController {
                     email: s.email,
                     name: s.fullName || `${s.firstName} ${s.lastName}`,
                 }));
-                result = await sendBulkEmail(tokens, recipients, subject, message);
+                result = await sendBulkEmail(tokens, recipients, subject, message, schoolName);
             }
             notif.sentCount = result.sent;
             notif.failedCount = result.failed;

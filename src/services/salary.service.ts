@@ -5,6 +5,7 @@ import SalaryStructureRepository from '../repositories/salaryStructure.repositor
 import OtherPaymentRepository from '../repositories/otherPayment.repository';
 import ErrorResponse from '../utils/errorResponse';
 import { Types } from 'mongoose';
+import UserNotification from '../models/userNotification.model';
 
 class SalaryService {
     /**
@@ -183,6 +184,7 @@ class SalaryService {
                 deductions,
                 totalSalary,
                 netSalary,
+                paidAmount: 0,
                 status: SalaryStatus.PENDING
             } as any);
             createdCount++;
@@ -212,17 +214,66 @@ class SalaryService {
         }
 
         if (salaryRecord.status === SalaryStatus.PAID) {
-            throw new ErrorResponse('Salary already paid', 400);
+            throw new ErrorResponse('Salary already fully paid', 400);
         }
 
-        // Update status
-        salaryRecord.status = SalaryStatus.PAID;
-        salaryRecord.paymentDate = new Date();
-        salaryRecord.paymentMode = paymentData.mode;
-        salaryRecord.transactionId = paymentData.transactionId;
-        salaryRecord.remarks = paymentData.remarks;
+        // Add the new payment amount to the accumulated paidAmount
+        salaryRecord.paidAmount = (salaryRecord.paidAmount || 0) + paymentData.amount;
 
-        await salaryRecord.save(); // BaseRepository update method re-fetches, so save is better here for object mutation
+        // Determine new status
+        if (salaryRecord.paidAmount >= salaryRecord.netSalary) {
+            salaryRecord.status = SalaryStatus.PAID;
+            // Cap it at netSalary to prevent overpayment logic complexity unless required
+            salaryRecord.paidAmount = salaryRecord.netSalary;
+        } else {
+            salaryRecord.status = SalaryStatus.PARTIAL;
+        }
+
+        const paymentDate = new Date();
+        salaryRecord.paymentDate = paymentDate;
+        salaryRecord.paymentMode = paymentData.mode;
+
+        // Push to history
+        if (!salaryRecord.paymentHistory) {
+            salaryRecord.paymentHistory = [];
+        }
+
+        salaryRecord.paymentHistory.push({
+            amount: paymentData.amount,
+            paymentMode: paymentData.mode,
+            paymentDate,
+            transactionId: paymentData.transactionId,
+            remarks: paymentData.remarks,
+        });
+
+        salaryRecord.markModified('paymentHistory');
+
+        // Append transaction ID and remarks if provided.
+        // We might just overwrite for MVP since array history isn't requested in schema.
+        if (paymentData.transactionId) {
+            salaryRecord.transactionId = paymentData.transactionId;
+        }
+        if (paymentData.remarks) {
+            salaryRecord.remarks = paymentData.remarks;
+        }
+
+        await salaryRecord.save();
+
+        // Notify the staff member
+        await UserNotification.create({
+            userId: salaryRecord.staffId,
+            schoolId: salaryRecord.schoolId,
+            title: 'Salary Payment Processed',
+            message: `An amount of ₹${paymentData.amount.toLocaleString('en-IN')} has been credited via ${paymentData.mode} on ${paymentDate.toLocaleDateString('en-IN')} (Ref: ${paymentData.transactionId || 'N/A'})`,
+            type: 'salary',
+            metadata: {
+                salaryId: salaryRecord._id,
+                amount: paymentData.amount,
+                mode: paymentData.mode,
+                transactionId: paymentData.transactionId,
+            }
+        });
+
         return salaryRecord;
     }
 
@@ -348,6 +399,7 @@ class SalaryService {
                 deductions,
                 totalSalary,
                 netSalary,
+                paidAmount: 0,
                 status: SalaryStatus.PENDING
             } as any);
         }

@@ -48,6 +48,10 @@ const salarySchema = new Schema<ISalaryRecord, ISalaryModel>(
             type: Number,
             required: true,
         },
+        paidAmount: {
+            type: Number,
+            default: 0,
+        },
         status: {
             type: String,
             enum: Object.values(SalaryStatus),
@@ -60,6 +64,15 @@ const salarySchema = new Schema<ISalaryRecord, ISalaryModel>(
             type: String,
             enum: Object.values(PaymentMode),
         },
+        paymentHistory: [
+            {
+                amount: { type: Number, required: true },
+                paymentDate: { type: Date, required: true },
+                paymentMode: { type: String, enum: Object.values(PaymentMode), required: true },
+                transactionId: { type: String },
+                remarks: { type: String },
+            }
+        ],
         transactionId: {
             type: String,
             trim: true,
