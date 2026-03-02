@@ -1,7 +1,7 @@
 import { Schema, model, Model } from 'mongoose';
 import { IFeePayment } from '../types';
 
-interface IFeePaymentModel extends Model<IFeePayment> {}
+interface IFeePaymentModel extends Model<IFeePayment> { }
 
 const feePaymentSchema = new Schema<IFeePayment, IFeePaymentModel>(
     {
@@ -50,6 +50,10 @@ const feePaymentSchema = new Schema<IFeePayment, IFeePaymentModel>(
             default: 0,
         },
         pdfPath: {
+            type: String,
+            trim: true,
+        },
+        transactionId: {
             type: String,
             trim: true,
         },

@@ -8,7 +8,7 @@ import SchoolSubscription from '../models/schoolSubscription.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 import { AuthRequest } from '../types';
-import { createPhonePePayment, isPhonePeConfigured } from '../services/phonepe.service';
+import { createPhonePePayment, isPhonePeConfigured, createPhonePeQrCode, checkPaymentStatus } from '../services/phonepe.service';
 
 /** Webhook request body is raw (Buffer) - set by express.raw middleware */
 interface WebhookRequest extends Request {
@@ -323,5 +323,103 @@ export async function phonepeWebhook(req: Request, res: Response, next: NextFunc
         return res.status(200).json({ received: true });
     } catch (err: any) {
         return next(err);
+    }
+}
+
+/**
+ * POST /payments/generate-qr
+ * Body: { amount, metadata }
+ */
+export async function generateQrCode(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+        const { amount, metadata } = req.body;
+        if (!amount || amount <= 0) return next(new ErrorResponse('Valid amount required', 400));
+
+        if (!isPhonePeConfigured()) {
+            return next(new ErrorResponse('PhonePe is not configured', 503));
+        }
+
+        const amountPaisa = Math.round(amount * 100);
+        const ts = Date.now().toString(36);
+        const mid = req.schoolId?.toString().slice(-6) || 'generic';
+        const merchantOrderId = `qr_${mid}_${ts}`;
+
+        const result = await createPhonePeQrCode({
+            merchantOrderId,
+            amountPaisa,
+            metaInfo: { ...metadata, schoolId: req.schoolId },
+        });
+
+        return sendResponse(res, result, 'QR generated', 200);
+    } catch (err: any) {
+        next(err);
+    }
+}
+
+/**
+ * POST /payments/confirm-phonepe
+ * Called by the frontend immediately after PhonePe redirects to success page.
+ * Activates the subscription for the school using the merchantOrderId.
+ * merchantOrderId format: p_{schoolId8}_{planId8}_{interval[0]}_{ts}
+ */
+export async function confirmPhonePePayment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+        const { merchantOrderId } = req.body as { merchantOrderId?: string };
+        const schoolId = req.schoolId;
+        if (!schoolId) return next(new ErrorResponse('School context required', 403));
+        if (!merchantOrderId) return next(new ErrorResponse('merchantOrderId required', 400));
+
+        // Decode interval from the 4th segment: 'm' = monthly, 'y' = yearly
+        const parts = merchantOrderId.split('_');
+        // Format: p_{sid}_{pid}_{interval_char}_{ts}
+        const intervalChar = parts[3] ?? 'm';
+        const interval = intervalChar === 'y' ? 'yearly' : 'monthly';
+
+        // Find the plan whose _id ends with the planId segment stored in merchantOrderId
+        const planIdSuffix = parts[2] ?? '';
+        const plans = await Plan.find({}).lean();
+        const plan = plans.find((p: any) => String(p._id).slice(-8) === planIdSuffix);
+
+        if (!plan) {
+            return next(new ErrorResponse('Could not resolve plan from merchantOrderId', 400));
+        }
+
+        const start = new Date();
+        const end = new Date();
+        if (interval === 'yearly') {
+            end.setFullYear(end.getFullYear() + 1);
+        } else {
+            end.setMonth(end.getMonth() + 1);
+        }
+
+        await SchoolSubscription.findOneAndUpdate(
+            { schoolId },
+            { planId: plan._id, subscriptionStart: start, subscriptionEnd: end, status: 'active' },
+            { upsert: true, new: true }
+        );
+
+        console.log(`[confirmPhonePe] Plan "${(plan as any).name}" activated for school ${schoolId}`);
+        return sendResponse(res, {
+            success: true,
+            planName: (plan as any).name,
+            interval,
+        }, 'Plan activated', 200);
+    } catch (err: any) {
+        next(err);
+    }
+}
+
+/**
+ * GET /payments/status/:merchantTransactionId
+ */
+export async function getPaymentStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+        const { merchantTransactionId } = req.params;
+        if (!merchantTransactionId) return next(new ErrorResponse('Transaction ID required', 400));
+
+        const result = await checkPaymentStatus(merchantTransactionId);
+        return sendResponse(res, result, 'Status fetched', 200);
+    } catch (err: any) {
+        next(err);
     }
 }

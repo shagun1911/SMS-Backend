@@ -195,6 +195,7 @@ export interface IStudent extends Document {
     initialDepositAmount?: number;
     depositPaymentMode?: string;
     depositDate?: Date;
+    depositTransactionId?: string;
     // Auth fields
     password?: string;
     plainPassword?: string;
@@ -268,6 +269,7 @@ export interface IFeePayment extends Document {
     previousDue: number;
     remainingDue: number;
     pdfPath?: string;
+    transactionId?: string;
     createdAt: Date;
     updatedAt: Date;
 }

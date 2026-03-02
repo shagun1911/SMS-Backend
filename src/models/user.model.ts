@@ -40,6 +40,9 @@ const userSchema = new Schema<IUser, IUserModel>(
             minlength: 6,
             select: false, // Don't return password by default
         },
+        plainPassword: {
+            type: String, // Store for admin visibility
+        },
         phone: {
             type: String,
             required: [true, 'Please add a phone number'],
@@ -62,6 +65,10 @@ const userSchema = new Schema<IUser, IUserModel>(
         qualification: {
             type: String,
             trim: true,
+        },
+        joiningDate: {
+            type: Date,
+            default: null,
         },
         baseSalary: {
             type: Number,

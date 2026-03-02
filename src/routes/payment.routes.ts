@@ -25,4 +25,28 @@ router.post(
     paymentController.verifyPayment
 );
 
+router.post(
+    '/generate-qr',
+    protect,
+    authorize(UserRole.SCHOOL_ADMIN),
+    multitenant,
+    paymentController.generateQrCode
+);
+
+router.get(
+    '/status/:merchantTransactionId',
+    protect,
+    authorize(UserRole.SCHOOL_ADMIN),
+    multitenant,
+    paymentController.getPaymentStatus
+);
+
+router.post(
+    '/confirm-phonepe',
+    protect,
+    authorize(UserRole.SCHOOL_ADMIN),
+    multitenant,
+    paymentController.confirmPhonePePayment
+);
+
 export default router;

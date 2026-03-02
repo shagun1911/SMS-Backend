@@ -10,9 +10,10 @@ import { UserRole } from '../types';
 export async function updateUsageForSchool(schoolId: string): Promise<void> {
     const [totalStudents, totalTeachers] = await Promise.all([
         Student.countDocuments({ schoolId, isActive: true }),
+        // Count ALL staff roles (teacher + accountant + transport_manager + schooladmin)
         User.countDocuments({
             schoolId,
-            role: UserRole.TEACHER,
+            role: { $in: [UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER, UserRole.SCHOOL_ADMIN] },
             isActive: true,
         }),
     ]);

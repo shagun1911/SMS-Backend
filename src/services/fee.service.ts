@@ -297,7 +297,7 @@ class FeeService {
     async processInitialDeposit(
         schoolId: string,
         student: any,
-        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date }
+        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string }
     ): Promise<IFeePayment | null> {
         if (!data.initialDepositAmount || data.initialDepositAmount <= 0) return null;
         const session = await SessionRepository.findActive(schoolId);
@@ -321,6 +321,7 @@ class FeeService {
             paymentDate,
             previousDue: 0,
             remainingDue,
+            transactionId: data.transactionId,
         } as any);
         await StudentRepository.update(student._id.toString(), {
             totalYearlyFee: totalYearly,
@@ -329,6 +330,7 @@ class FeeService {
             initialDepositAmount: data.initialDepositAmount,
             depositPaymentMode: data.paymentMode,
             depositDate: paymentDate,
+            depositTransactionId: data.transactionId,
         } as any);
         const school = await SchoolRepository.findById(schoolId);
         if (school) {

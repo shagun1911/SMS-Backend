@@ -23,8 +23,9 @@ class StudentController {
             if (initialDeposit > 0) {
                 await FeeService.processInitialDeposit(req.schoolId!, student, {
                     initialDepositAmount: initialDeposit,
-                    paymentMode: req.body.paymentMode || 'cash',
+                    paymentMode: req.body.paymentMode || req.body.depositPaymentMode || 'cash',
                     depositDate: req.body.depositDate ? new Date(req.body.depositDate) : undefined,
+                    transactionId: req.body.depositTransactionId,
                 });
                 const updated = await StudentService.getStudent(req.schoolId!, student._id.toString());
                 res.status(201).json({ success: true, data: updated });

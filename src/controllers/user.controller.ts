@@ -1,5 +1,8 @@
 import { Response, NextFunction } from 'express';
 import User from '../models/user.model';
+import Salary from '../models/salary.model';
+import SalaryStructure from '../models/salaryStructure.model';
+import OtherPayment from '../models/otherPayment.model';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 import { checkTeacherLimit } from '../services/planLimit.service';
@@ -60,17 +63,21 @@ class UserController {
             const schoolId = req.schoolId!;
             req.body.schoolId = schoolId;
 
-            if (req.body.role === UserRole.TEACHER) {
+            // Check staff limit for ALL staff roles (teachers, accountants, transport managers, admins)
+            const isStaffRole = [UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER, UserRole.SCHOOL_ADMIN].includes(req.body.role);
+            if (isStaffRole) {
                 await checkTeacherLimit(schoolId);
             }
 
             if (!req.body.password) {
-                req.body.password = 'Staff@123';
+                const firstName = (req.body.name || '').split(' ')[0].toLowerCase() || 'staff';
+                const phoneLast4 = (req.body.phone || '').slice(-4) || '1234';
+                req.body.password = firstName + phoneLast4;
             }
 
             const user = await User.create(req.body);
 
-            if (user.role === UserRole.TEACHER) {
+            if (isStaffRole) {
                 await updateUsageForSchool(schoolId);
             }
 
@@ -99,7 +106,7 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to update this user`, 401));
             }
 
-            const allowed = ['name', 'email', 'phone', 'subject', 'qualification', 'baseSalary', 'photo', 'isActive', 'permissions'];
+            const allowed = ['name', 'email', 'phone', 'subject', 'qualification', 'joiningDate', 'baseSalary', 'photo', 'isActive', 'permissions'];
             const payload: any = {};
             allowed.forEach((key) => {
                 if (req.body[key] !== undefined) payload[key] = req.body[key];
@@ -142,8 +149,16 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to update this user`, 401));
             }
 
-            const { password } = req.body;
-            if (!password || typeof password !== 'string' || password.length < 6) {
+            let { password } = req.body;
+
+            // If No password provided (shouldn't happen with modern UI, but for safety)
+            if (!password) {
+                const firstName = (user.name || '').split(' ')[0].toLowerCase() || 'staff';
+                const phoneLast4 = (user.phone || '').slice(-4) || '1234';
+                password = firstName + phoneLast4;
+            }
+
+            if (typeof password !== 'string' || password.length < 6) {
                 return next(new ErrorResponse('Password must be at least 6 characters', 400));
             }
 
@@ -177,6 +192,14 @@ class UserController {
 
             const schoolId = user.schoolId?.toString();
             const wasTeacher = user.role === UserRole.TEACHER;
+            const staffId = user._id;
+
+            // Cascade delete all records related to this staff member
+            await Promise.all([
+                Salary.deleteMany({ staffId }),
+                SalaryStructure.deleteMany({ staffId }),
+                OtherPayment.deleteMany({ staffId }),
+            ]);
 
             await User.findByIdAndDelete(req.params.id);
 

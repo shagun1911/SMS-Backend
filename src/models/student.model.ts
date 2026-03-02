@@ -153,6 +153,7 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         initialDepositAmount: { type: Number, default: 0 },
         depositPaymentMode: { type: String, trim: true },
         depositDate: { type: Date },
+        depositTransactionId: { type: String, trim: true },
         // Auth fields
         password: { type: String, select: false },
         plainPassword: { type: String },
