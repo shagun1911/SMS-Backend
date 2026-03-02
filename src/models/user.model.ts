@@ -108,14 +108,17 @@ const userSchema = new Schema<IUser, IUserModel>(
 userSchema.index({ schoolId: 1, role: 1 }); // Essential for finding staff by role within a school
 
 // Encrypt password using bcrypt
-userSchema.pre('save', async function (next) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+userSchema.pre('save', async function (this: any, next: any) {
     if (!this.isModified('password')) {
-        next();
+        return next();
     }
 
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    next();
 });
+
 
 // Match user entered password tohashed password in database
 userSchema.methods.matchPassword = async function (enteredPassword: string): Promise<boolean> {

@@ -19,6 +19,7 @@ export interface IUser extends Document {
     name: string;
     email: string;
     password: string;
+    plainPassword?: string;
     phone: string;
     role: UserRole;
     photo?: string;
@@ -26,7 +27,7 @@ export interface IUser extends Document {
     qualification?: string;
     joiningDate?: Date;
     baseSalary?: number;
-    salary?: number; // Keep existing for compatibility if needed, but primary is baseSalary
+    salary?: number;
     bankDetails?: {
         accountNumber: string;
         ifscCode: string;
@@ -36,7 +37,6 @@ export interface IUser extends Document {
     isActive: boolean;
     lastLogin?: Date;
     mustChangePassword?: boolean;
-    /** Teacher permissions granted by school admin: edit_timetable, manage_announcements, view_transport */
     permissions?: string[];
     refreshToken?: string;
     createdAt: Date;
