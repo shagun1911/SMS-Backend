@@ -282,13 +282,52 @@ class FeeService {
     }
 
     async getDefaulters(schoolId: string): Promise<any[]> {
-        return await Student.find({
-            schoolId: new Types.ObjectId(schoolId),
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonthIndex = today.getMonth(); // 0-based
+
+        const students = await Student.find({
+            schoolId: schoolObjId,
             isActive: true,
-            dueAmount: { $gt: 0 },
+            totalYearlyFee: { $gt: 0 },
         })
             .sort({ class: 1, section: 1 })
             .lean();
+
+        const defaulters: any[] = [];
+
+        for (const s of students as any[]) {
+            const totalYearly: number = s.totalYearlyFee ?? 0;
+            const paidAmount: number = s.paidAmount ?? 0;
+            const admissionDate: Date | null = s.admissionDate ? new Date(s.admissionDate) : null;
+
+            const startYear = admissionDate ? admissionDate.getFullYear() : currentYear;
+            const startMonthIndex = admissionDate ? admissionDate.getMonth() : 0;
+
+            let monthDiff =
+                (currentYear - startYear) * 12 +
+                (currentMonthIndex - startMonthIndex) +
+                1;
+
+            if (monthDiff <= 0) continue;
+            if (monthDiff > 12) monthDiff = 12;
+
+            const perMonth = totalYearly / 12;
+            const expectedRaw = perMonth * monthDiff;
+            const expectedTillNow = Math.min(totalYearly, Math.round(expectedRaw));
+
+            if (paidAmount + 0.5 < expectedTillNow) {
+                const shortfallTillNow = expectedTillNow - paidAmount;
+                defaulters.push({
+                    ...s,
+                    expectedTillNow,
+                    shortfallTillNow,
+                });
+            }
+        }
+
+        return defaulters;
     }
 
     /**
@@ -633,6 +672,43 @@ class FeeService {
             totalExpected: totalExpectedAll || undefined,
             defaulterCount,
             monthlyCollection: monthlyPayments as { month: string; amount: number }[],
+        };
+    }
+
+    /**
+     * Get monthly fee stats and payment records for a specific month
+     */
+    async getMonthlyFeeData(
+        schoolId: string,
+        year: number,
+        month: number
+    ): Promise<{
+        stats: { totalCollected: number; totalExpected: number; totalPending: number; collectionRate: number; transactionCount: number };
+        payments: IFeePayment[];
+    }> {
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const [payments, expectedResult] = await Promise.all([
+            FeePaymentRepository.findPaymentsByMonth(schoolId, year, month),
+            Student.aggregate([
+                { $match: { schoolId: schoolObjId, isActive: true, totalYearlyFee: { $gt: 0 } } },
+                { $group: { _id: null, total: { $sum: { $divide: ['$totalYearlyFee', 12] } } } },
+            ]),
+        ]);
+
+        const totalCollected = payments.reduce((sum, p) => sum + (p.amountPaid ?? 0), 0);
+        const totalExpected = expectedResult[0]?.total ?? 0;
+        const totalPending = Math.max(0, totalExpected - totalCollected);
+        const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+        return {
+            stats: {
+                totalCollected,
+                totalExpected,
+                totalPending,
+                collectionRate,
+                transactionCount: payments.length,
+            },
+            payments,
         };
     }
 }

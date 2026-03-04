@@ -134,6 +134,21 @@ class FeeController {
         }
     }
 
+    // GET Monthly fee data (stats + payments for a specific month)
+    async getMonthlyFeeData(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const year = parseInt(req.query.year as string, 10);
+            const month = parseInt(req.query.month as string, 10);
+            if (!year || !month || month < 1 || month > 12) {
+                return void res.status(400).json({ success: false, message: 'Valid year and month (1-12) required' });
+            }
+            const data = await FeeService.getMonthlyFeeData(req.schoolId!, year, month);
+            sendResponse(res, data, 'Monthly fee data retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
     // GET Fee structures (list for session)
     async listStructures(req: AuthRequest, res: Response, next: NextFunction) {
         try {

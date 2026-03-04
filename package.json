@@ -9,7 +9,9 @@
         "start": "node dist/server.js",
         "lint": "eslint . --ext .ts",
         "format": "prettier --write \"src/**/*.ts\"",
-        "test": "jest --watchAll"
+        "test": "jest --watchAll",
+        "seed:load-test": "ts-node --transpile-only src/scripts/seed-load-test-school.ts",
+        "seed:erase-load-test": "ts-node --transpile-only src/scripts/erase-load-test-school.ts"
     },
     "keywords": [
         "school",

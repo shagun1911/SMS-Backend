@@ -19,6 +19,7 @@ router.get('/student/me', protectStudent, FeeController.getStudentFeesForStudent
 router.use(protect, multitenant); // Global middlewares
 
 router.get('/stats', FeeController.getFeeStats);
+router.get('/monthly', FeeController.getMonthlyFeeData);
 router.get('/', FeeController.listFees);
 
 router.post(

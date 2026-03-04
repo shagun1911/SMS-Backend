@@ -46,7 +46,7 @@ function hLine(doc: any, y: number, color = '#bdbdbd', lw = 0.5) {
 export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffer> {
     const {
         school, payment, student,
-        totalAnnualFee, thisPayment, remainingDue,
+        totalAnnualFee, thisPayment, remainingDue, previousPaid = 0,
         sessionYear, feeComponents, concession = 0, lateFee = 0,
     } = opts;
 
@@ -198,7 +198,9 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
         { label: '(+) Additional / Late Fee', value: lateFee, fg: '#e65100', bg: '#fff3e0', bold: false },
         { label: '(-) Concession / Discount', value: concession, fg: '#1b5e20', bg: '#f1f8e9', bold: false },
         { label: 'NET FEE', value: netFee, fg: '#ffffff', bg: '#1565c0', bold: true },
-        { label: 'AMOUNT RECEIVED', value: thisPayment, fg: '#ffffff', bg: '#2e7d32', bold: true },
+        ...(previousPaid > 0 ? [{ label: '(+) Paid at Admission', value: previousPaid, fg: '#1b5e20', bg: '#e8f5e9', bold: false }] : []),
+        { label: previousPaid > 0 ? 'AMOUNT RECEIVED (This Payment)' : 'AMOUNT RECEIVED', value: thisPayment, fg: '#ffffff', bg: '#2e7d32', bold: true },
+        ...(previousPaid > 0 ? [{ label: 'TOTAL PAID TO DATE', value: previousPaid + thisPayment, fg: '#ffffff', bg: '#1b5e20', bold: true }] : []),
         { label: 'BALANCE DUE', value: balance, fg: '#ffffff', bg: balance > 0 ? '#b71c1c' : '#388e3c', bold: true },
     ];
 
