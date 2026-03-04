@@ -293,6 +293,16 @@ class FeeController {
             next(error);
         }
     }
+
+    // GET Pending students for current month
+    async getPendingCurrentMonth(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const pending = await FeeService.getPendingCurrentMonthStudents(req.schoolId!);
+            sendResponse(res, pending, 'Pending students for current month', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new FeeController();

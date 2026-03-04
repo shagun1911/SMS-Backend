@@ -41,6 +41,19 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
             .exec();
     }
 
+    async sumPaymentsUpToMonth(schoolId: string, year: number, month: number): Promise<number> {
+        const start = new Date(year, 0, 1, 0, 0, 0);
+        const end = new Date(year, month, 0, 23, 59, 59);
+        const docs = await this.model
+            .find({
+                schoolId: new Types.ObjectId(schoolId),
+                paymentDate: { $gte: start, $lte: end },
+            })
+            .select('amountPaid')
+            .lean();
+        return docs.reduce((sum: number, p: any) => sum + (p.amountPaid || 0), 0);
+    }
+
     async getNextReceiptNumber(schoolId: string, yearPrefix: string): Promise<string> {
         const pattern = new RegExp(`^SSMS-${yearPrefix}-(\\d+)$`);
         const last = await this.model

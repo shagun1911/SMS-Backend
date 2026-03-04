@@ -50,6 +50,7 @@ router.get('/payments', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), F
 // Student fee summary, receipt download, defaulters
 router.get('/student/:studentId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getStudentFees);
 router.get('/receipt/:receiptId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getReceipt);
+router.get('/pending-current', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getPendingCurrentMonth);
 router.get('/defaulters', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getDefaulters);
 
 // Generation

@@ -287,6 +287,42 @@ class FeeService {
         const currentYear = today.getFullYear();
         const currentMonthIndex = today.getMonth(); // 0-based
 
+        const session = await SessionRepository.findActive(schoolId);
+        const structures = session ? await FeeStructureRepository.findBySession(schoolId, session._id.toString()) : [];
+        const classFeeParts = new Map<string, { monthlyTotal: number; oneTimeTotal: number }>();
+        for (const s of structures as any[]) {
+            const rawItems: Array<{ amount: number; type?: string }> =
+                (s.components && s.components.length > 0)
+                    ? s.components
+                    : (s.fees || []).map((f: any) => ({ amount: f.amount, type: f.type }));
+            let monthlyTotal = 0;
+            let oneTimeTotal = 0;
+            for (const item of rawItems) {
+                if (!item || typeof item.amount !== 'number') continue;
+                const t = (item.type || '').toString().toLowerCase();
+                if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
+                else if (t === 'monthly') monthlyTotal += item.amount;
+            }
+            if (s.class) classFeeParts.set(String(s.class), { monthlyTotal, oneTimeTotal });
+        }
+        const getPartsForClass = (cls?: string) => {
+            if (!cls) return null;
+            const direct = classFeeParts.get(cls);
+            if (direct) return direct;
+            if (typeof cls === 'string' && cls.includes(' ')) {
+                const first = classFeeParts.get(cls.split(' ')[0]);
+                if (first) return first;
+            }
+            return null;
+        };
+        const expectedFromParts = (parts: { monthlyTotal: number; oneTimeTotal: number } | null, totalYearly: number, monthsCount: number) => {
+            if (monthsCount <= 0) return 0;
+            if (parts && (parts.monthlyTotal > 0 || parts.oneTimeTotal > 0)) {
+                return Math.round(parts.oneTimeTotal + parts.monthlyTotal * monthsCount);
+            }
+            return Math.round((totalYearly / 12) * monthsCount);
+        };
+
         const students = await Student.find({
             schoolId: schoolObjId,
             isActive: true,
@@ -313,21 +349,124 @@ class FeeService {
             if (monthDiff <= 0) continue;
             if (monthDiff > 12) monthDiff = 12;
 
-            const perMonth = totalYearly / 12;
-            const expectedRaw = perMonth * monthDiff;
-            const expectedTillNow = Math.min(totalYearly, Math.round(expectedRaw));
+            // Defaulters = unpaid for previous months (not current month)
+            const prevMonths = Math.max(0, monthDiff - 1);
+            if (prevMonths <= 0) continue;
 
-            if (paidAmount + 0.5 < expectedTillNow) {
-                const shortfallTillNow = expectedTillNow - paidAmount;
+            const parts = getPartsForClass(s.class);
+            const expectedTillPrev = Math.min(totalYearly, expectedFromParts(parts, totalYearly, prevMonths));
+
+            if (paidAmount + 0.5 < expectedTillPrev) {
+                const shortfallTillPrev = expectedTillPrev - paidAmount;
                 defaulters.push({
                     ...s,
-                    expectedTillNow,
-                    shortfallTillNow,
+                    expectedTillPrev,
+                    shortfallTillPrev,
                 });
             }
         }
 
         return defaulters;
+    }
+
+    /**
+     * Pending students for the current month.
+     * Pending current month = paid up to previous months, but not fully paid up to current month.
+     */
+    async getPendingCurrentMonthStudents(schoolId: string): Promise<any[]> {
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonthIndex = today.getMonth(); // 0-based
+
+        const session = await SessionRepository.findActive(schoolId);
+        const structures = session ? await FeeStructureRepository.findBySession(schoolId, session._id.toString()) : [];
+        const classFeeParts = new Map<string, { monthlyTotal: number; oneTimeTotal: number }>();
+        for (const s of structures as any[]) {
+            const rawItems: Array<{ amount: number; type?: string }> =
+                (s.components && s.components.length > 0)
+                    ? s.components
+                    : (s.fees || []).map((f: any) => ({ amount: f.amount, type: f.type }));
+            let monthlyTotal = 0;
+            let oneTimeTotal = 0;
+            for (const item of rawItems) {
+                if (!item || typeof item.amount !== 'number') continue;
+                const t = (item.type || '').toString().toLowerCase();
+                if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
+                else if (t === 'monthly') monthlyTotal += item.amount;
+            }
+            if (s.class) classFeeParts.set(String(s.class), { monthlyTotal, oneTimeTotal });
+        }
+        const getPartsForClass = (cls?: string) => {
+            if (!cls) return null;
+            const direct = classFeeParts.get(cls);
+            if (direct) return direct;
+            if (typeof cls === 'string' && cls.includes(' ')) {
+                const first = classFeeParts.get(cls.split(' ')[0]);
+                if (first) return first;
+            }
+            return null;
+        };
+        const expectedFromParts = (parts: { monthlyTotal: number; oneTimeTotal: number } | null, totalYearly: number, monthsCount: number) => {
+            if (monthsCount <= 0) return 0;
+            if (parts && (parts.monthlyTotal > 0 || parts.oneTimeTotal > 0)) {
+                return Math.round(parts.oneTimeTotal + parts.monthlyTotal * monthsCount);
+            }
+            return Math.round((totalYearly / 12) * monthsCount);
+        };
+
+        const students = await Student.find({
+            schoolId: schoolObjId,
+            isActive: true,
+            totalYearlyFee: { $gt: 0 },
+        })
+            .sort({ class: 1, section: 1 })
+            .lean();
+
+        const pending: any[] = [];
+
+        for (const s of students as any[]) {
+            const totalYearly: number = s.totalYearlyFee ?? 0;
+            const paidAmount: number = s.paidAmount ?? 0;
+            const admissionDate: Date | null = s.admissionDate ? new Date(s.admissionDate) : null;
+
+            const startYear = admissionDate ? admissionDate.getFullYear() : currentYear;
+            const startMonthIndex = admissionDate ? admissionDate.getMonth() : 0;
+
+            let monthDiff =
+                (currentYear - startYear) * 12 +
+                (currentMonthIndex - startMonthIndex) +
+                1;
+
+            if (monthDiff <= 0) continue;
+            if (monthDiff > 12) monthDiff = 12;
+
+            const parts = getPartsForClass(s.class);
+            const expectedTillPrev = Math.min(totalYearly, expectedFromParts(parts, totalYearly, Math.max(0, monthDiff - 1)));
+            const expectedTillNow = Math.min(totalYearly, expectedFromParts(parts, totalYearly, monthDiff));
+
+            // Only current month pending (no previous month backlog)
+            const okTillPrev = paidAmount + 0.5 >= expectedTillPrev;
+            const missingCurrent = paidAmount + 0.5 < expectedTillNow;
+            if (okTillPrev && missingCurrent) {
+                const currentMonthTotal = Math.max(0, Math.round(expectedTillNow - expectedTillPrev));
+                const currentMonthPaid = Math.min(
+                    currentMonthTotal,
+                    Math.max(0, Math.round(paidAmount - expectedTillPrev))
+                );
+                const currentMonthDue = Math.max(0, currentMonthTotal - currentMonthPaid);
+                pending.push({
+                    ...s,
+                    expectedTillNow,
+                    shortfallTillNow: expectedTillNow - paidAmount,
+                    currentMonthTotal,
+                    currentMonthPaid,
+                    currentMonthDue,
+                });
+            }
+        }
+
+        return pending;
     }
 
     /**
@@ -338,24 +477,75 @@ class FeeService {
         student: any,
         data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string }
     ): Promise<IFeePayment | null> {
-        if (!data.initialDepositAmount || data.initialDepositAmount <= 0) return null;
         const session = await SessionRepository.findActive(schoolId);
         if (!session) return null;
+
         let totalYearly = student.totalYearlyFee ?? 0;
-        if (totalYearly === 0 && student.class) {
-            const structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
-            if (structure) totalYearly = structure.totalAmount ?? structure.totalAnnualFee ?? 0;
+        let firstMonthFee = 0;
+
+        // Derive yearly + first-month fee from fee structure when possible
+        if (student.class) {
+            const structure = await FeeStructureRepository.findByClass(
+                schoolId,
+                session._id.toString(),
+                student.class
+            );
+            if (structure) {
+                // Prefer new components model (with type 'monthly' | 'one-time')
+                const rawItems: Array<{ amount: number; type?: string }> =
+                    (structure as any).components && (structure as any).components.length > 0
+                        ? (structure as any).components
+                        : ((structure as any).fees || []).map((f: any) => ({
+                              amount: f.amount,
+                              type: f.type,
+                          }));
+
+                let monthlyTotal = 0;
+                let oneTimeTotal = 0;
+                for (const item of rawItems) {
+                    if (!item || typeof item.amount !== 'number') continue;
+                    const t = (item.type || '').toString().toLowerCase();
+                    if (t === 'one-time' || t === 'one_time' || t === 'one time') {
+                        oneTimeTotal += item.amount;
+                    } else if (t === 'monthly') {
+                        monthlyTotal += item.amount;
+                    }
+                }
+
+                // Annual = all monthly components for 12 months + all one-time components
+                const computedAnnual = monthlyTotal * 12 + oneTimeTotal;
+                if (!totalYearly || totalYearly <= 0) {
+                    totalYearly = computedAnnual || structure.totalAmount || structure.totalAnnualFee || 0;
+                }
+
+                // First month fee = one-time + first month of monthly components
+                if (oneTimeTotal > 0 || monthlyTotal > 0) {
+                    firstMonthFee = oneTimeTotal + monthlyTotal;
+                }
+            }
         }
-        if (totalYearly === 0) totalYearly = data.initialDepositAmount;
+
+        // If still no annual total (no structure), fall back to provided amount
+        if (totalYearly === 0 && data.initialDepositAmount > 0) {
+            totalYearly = data.initialDepositAmount;
+        }
+
+        // Decide how much to actually charge for the initial deposit
+        let initialAmount = data.initialDepositAmount;
+        if (!initialAmount || initialAmount <= 0) {
+            initialAmount = firstMonthFee || totalYearly;
+        }
+        if (!initialAmount || initialAmount <= 0) return null;
+
         const yearPrefix = session.sessionYear ? session.sessionYear.split('-')[0] : String(new Date().getFullYear());
         const receiptNumber = await FeePaymentRepository.getNextReceiptNumber(schoolId, yearPrefix);
         const paymentDate = data.depositDate ? new Date(data.depositDate) : new Date();
-        const remainingDue = totalYearly - data.initialDepositAmount;
+        const remainingDue = totalYearly - initialAmount;
         const payment = await FeePaymentRepository.create({
             schoolId: new Types.ObjectId(schoolId) as any,
             studentId: student._id,
             receiptNumber,
-            amountPaid: data.initialDepositAmount,
+            amountPaid: initialAmount,
             paymentMode: data.paymentMode || 'cash',
             paymentDate,
             previousDue: 0,
@@ -364,9 +554,9 @@ class FeeService {
         } as any);
         await StudentRepository.update(student._id.toString(), {
             totalYearlyFee: totalYearly,
-            paidAmount: data.initialDepositAmount,
+            paidAmount: initialAmount,
             dueAmount: remainingDue,
-            initialDepositAmount: data.initialDepositAmount,
+            initialDepositAmount: initialAmount,
             depositPaymentMode: data.paymentMode,
             depositDate: paymentDate,
             depositTransactionId: data.transactionId,
@@ -376,10 +566,10 @@ class FeeService {
             const pdfBuffer = await generateReceiptPDF({
                 school,
                 payment,
-                student: { ...student, totalYearlyFee: totalYearly, paidAmount: data.initialDepositAmount, dueAmount: remainingDue },
+                student: { ...student, totalYearlyFee: totalYearly, paidAmount: initialAmount, dueAmount: remainingDue },
                 totalAnnualFee: totalYearly,
                 previousPaid: 0,
-                thisPayment: data.initialDepositAmount,
+                thisPayment: initialAmount,
                 remainingDue,
             });
             const receiptsDir = path.join(process.cwd(), 'receipts');
@@ -687,18 +877,26 @@ class FeeService {
         payments: IFeePayment[];
     }> {
         const schoolObjId = new Types.ObjectId(schoolId);
-        const [payments, expectedResult] = await Promise.all([
+        const [payments, expectedResult, collectedTillMonth] = await Promise.all([
+            // Payments in the selected month
             FeePaymentRepository.findPaymentsByMonth(schoolId, year, month),
+            // Expected amount per month across active students
             Student.aggregate([
                 { $match: { schoolId: schoolObjId, isActive: true, totalYearlyFee: { $gt: 0 } } },
                 { $group: { _id: null, total: { $sum: { $divide: ['$totalYearlyFee', 12] } } } },
             ]),
+            // Total collected from the start of the year up to the end of this month
+            FeePaymentRepository.sumPaymentsUpToMonth(schoolId, year, month),
         ]);
 
         const totalCollected = payments.reduce((sum, p) => sum + (p.amountPaid ?? 0), 0);
-        const totalExpected = expectedResult[0]?.total ?? 0;
-        const totalPending = Math.max(0, totalExpected - totalCollected);
-        const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+        const perMonthExpected = expectedResult[0]?.total ?? 0;
+        const totalExpected = perMonthExpected;
+
+        // Cumulative expected till this month vs cumulative collected till this month
+        const expectedTillMonth = perMonthExpected * month;
+        const totalPending = Math.max(0, expectedTillMonth - collectedTillMonth);
+        const collectionRate = expectedTillMonth > 0 ? Math.round((collectedTillMonth / expectedTillMonth) * 100) : 0;
 
         return {
             stats: {
