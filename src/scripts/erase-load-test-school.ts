@@ -98,7 +98,7 @@ async function main() {
     console.log('🗑️  Deleting load-test school data...\n');
     for (const { name, model } of collections) {
         const filter = name === 'School' ? { _id: schoolId } : { schoolId };
-        const res = await model.deleteMany(filter);
+        const res = await (model as mongoose.Model<unknown>).deleteMany(filter);
         if (res.deletedCount > 0) {
             console.log(`   ${name}: ${res.deletedCount} deleted`);
         }
