@@ -238,6 +238,7 @@ class FeeController {
                 amountPaid: Number(amountPaid),
                 paymentMode: paymentMode || 'cash',
                 paymentDate,
+                staffId: req.user!._id.toString(),
             });
             res.setHeader('Content-Type', 'application/json');
             sendResponse(res, { payment: result.payment, receiptNumber: result.payment.receiptNumber }, 'Payment recorded', 200);

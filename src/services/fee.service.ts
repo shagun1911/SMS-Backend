@@ -213,7 +213,7 @@ class FeeService {
      */
     async payFee(
         schoolId: string,
-        payload: { studentId: string; amountPaid: number; paymentMode: string; paymentDate?: string }
+        payload: { studentId: string; amountPaid: number; paymentMode: string; paymentDate?: string; staffId?: string }
     ): Promise<{ payment: IFeePayment; pdfBuffer: Buffer }> {
         const student = await StudentRepository.findById(payload.studentId);
         if (!student || student.schoolId.toString() !== schoolId) {
@@ -264,6 +264,46 @@ class FeeService {
             dueAmount: remainingDue,
         } as any);
 
+        // Allocate the payment into per-month StudentFee ledger records sequentially.
+        // This ensures Expected/Pending on the fee management screen reflect reality.
+        try {
+            await this.ensureStudentFeeLedgerForActiveSession(schoolId, student);
+            const months = this.getSessionYearMonths(session);
+            let remaining = payload.amountPaid;
+            for (const m of months) {
+                if (remaining <= 0) break;
+                const fee = await StudentFeeRepository.findByStudentMonth(
+                    schoolId,
+                    payload.studentId,
+                    session._id.toString(),
+                    m.monthName
+                );
+                if (!fee || fee.status === FeeStatus.PAID) continue;
+                const available = fee.remainingAmount ?? 0;
+                if (available <= 0) continue;
+                const amt = Math.min(remaining, available);
+                if (payload.staffId) {
+                    await this.recordPayment(schoolId, fee._id.toString(), {
+                        amount: amt,
+                        mode: payload.paymentMode as PaymentMode,
+                        staffId: payload.staffId,
+                        receiptNumber: payment.receiptNumber,
+                        paymentDate,
+                        remarks: 'Monthly fee payment',
+                    });
+                } else {
+                    // No staffId available — update ledger directly.
+                    (fee as any).paidAmount = ((fee as any).paidAmount || 0) + amt;
+                    (fee as any).remainingAmount = Math.max(0, ((fee as any).remainingAmount || 0) - amt);
+                    if ((fee as any).remainingAmount <= 0) (fee as any).status = FeeStatus.PAID;
+                    await (fee as any).save();
+                }
+                remaining -= amt;
+            }
+        } catch (_) {
+            // Ledger allocation failure must not block the fee payment itself.
+        }
+
         const school = await SchoolRepository.findById(schoolId);
         if (!school) throw new ErrorResponse('School not found', 404);
 
@@ -311,12 +351,21 @@ class FeeService {
         return await FeePaymentRepository.findByStudent(schoolId, studentId);
     }
 
-    async getStudentFeeSummary(schoolId: string, studentId: string): Promise<{ student: any; payments: IFeePayment[] } | null> {
+    async getStudentFeeSummary(
+        schoolId: string,
+        studentId: string
+    ): Promise<{ student: any; payments: IFeePayment[]; monthlyFee?: number; oneTimeFee?: number } | null> {
         const student = await StudentRepository.findById(studentId);
         if (!student || student.schoolId.toString() !== schoolId) return null;
         const totalFromStudent = (student as any).totalYearlyFee ?? 0;
         const studentClass = (student as any).class;
-        if (totalFromStudent === 0 && studentClass) {
+        let monthlyFee: number | undefined;
+        let oneTimeFee: number | undefined;
+
+        // Always look up the fee structure so we can return accurate monthlyFee / oneTimeFee.
+        // (Previously this was guarded by totalFromStudent === 0, which meant students who
+        //  already had totalYearlyFee set never got these fields populated.)
+        if (studentClass) {
             const session = await SessionRepository.findActive(schoolId);
             if (session) {
                 let structure = await FeeStructureRepository.findByClass(
@@ -332,21 +381,48 @@ class FeeService {
                     );
                 }
                 if (structure) {
-                    const annualTotal = structure.totalAmount ?? structure.totalAnnualFee ?? 0;
-                    await StudentRepository.update(studentId, {
-                        totalYearlyFee: annualTotal,
-                        dueAmount: annualTotal - ((student as any).paidAmount ?? 0),
-                    } as any);
-                    const updated = await StudentRepository.findById(studentId);
-                    if (updated) {
-                        const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
-                        return { student: updated, payments };
+                    const rawItems: Array<{ amount: number; type?: string }> =
+                        (structure as any).components && (structure as any).components.length > 0
+                            ? (structure as any).components
+                            : ((structure as any).fees || []).map((f: any) => ({
+                                  amount: f.amount,
+                                  type: f.type,
+                              }));
+                    let monthlyTotal = 0;
+                    let oneTimeTotal = 0;
+                    for (const item of rawItems) {
+                        if (!item || typeof item.amount !== 'number') continue;
+                        const t = (item.type || '').toString().toLowerCase();
+                        if (t === 'one-time' || t === 'one_time' || t === 'one time') {
+                            oneTimeTotal += item.amount;
+                        } else if (t === 'monthly') {
+                            monthlyTotal += item.amount;
+                        }
+                    }
+                    monthlyFee = monthlyTotal > 0 ? monthlyTotal : undefined;
+                    oneTimeFee = oneTimeTotal > 0 ? oneTimeTotal : undefined;
+
+                    // Back-fill totalYearlyFee on student if it was missing.
+                    if (totalFromStudent === 0) {
+                        const annualTotal =
+                            structure.totalAmount ??
+                            structure.totalAnnualFee ??
+                            monthlyTotal * 12 + oneTimeTotal;
+                        await StudentRepository.update(studentId, {
+                            totalYearlyFee: annualTotal,
+                            dueAmount: annualTotal - ((student as any).paidAmount ?? 0),
+                        } as any);
+                        const updated = await StudentRepository.findById(studentId);
+                        if (updated) {
+                            const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
+                            return { student: updated, payments, monthlyFee, oneTimeFee };
+                        }
                     }
                 }
             }
         }
         const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
-        return { student, payments };
+        return { student, payments, monthlyFee, oneTimeFee };
     }
 
     async getReceiptPdf(schoolId: string, receiptId: string): Promise<Buffer> {
@@ -640,9 +716,10 @@ class FeeService {
                     totalYearly = computedAnnual || structure.totalAmount || structure.totalAnnualFee || 0;
                 }
 
-                // First month fee = one-time + first month of monthly components
-                if (oneTimeTotal > 0 || monthlyTotal > 0) {
-                    firstMonthFee = oneTimeTotal + monthlyTotal;
+                // Initial deposit should now cover ONLY one-time components
+                // (admission fee, exam fee, etc.), not the first month fee.
+                if (oneTimeTotal > 0) {
+                    firstMonthFee = oneTimeTotal;
                 }
 
                 oneTimeTotalFromStructure = oneTimeTotal;
@@ -654,9 +731,13 @@ class FeeService {
             totalYearly = data.initialDepositAmount;
         }
 
-        // Decide how much to actually charge for the initial deposit
+        // Decide how much to actually charge for the initial deposit.
+        // Business rule change:
+        //   Initial deposit = sum of ALL one-time components for the session
+        //   (admission fee, exam fee, electricity one-time, etc.).
         let initialAmount = data.initialDepositAmount;
         if (!initialAmount || initialAmount <= 0) {
+            // Default to one-time total from structure; if not available, fall back to annual.
             initialAmount = firstMonthFee || totalYearly;
         }
         if (!initialAmount || initialAmount <= 0) return null;
@@ -1139,12 +1220,15 @@ class FeeService {
         // Exclude deleted students so they don't show as Unknown
         const validFees = (feeRecords as any[]).filter((f) => f.studentId);
 
+        // Stats are based on the per-month StudentFee ledger so they accurately reflect
+        // whether each student's monthly fee has been paid, regardless of when the cash
+        // was physically received (e.g. advance payments collected in a prior month).
         const totalExpected = validFees.reduce((sum, f) => sum + (Number(f.totalAmount) || 0), 0);
         const totalCollected = validFees.reduce((sum, f) => sum + (Number(f.paidAmount) || 0), 0);
         const totalPending = validFees.reduce((sum, f) => sum + (Number(f.remainingAmount) || 0), 0);
 
-        // Payments table is grouped by when the cash was actually received,
-        // so we use FeePayment records filtered by paymentDate month.
+        // Payment Records table still shows receipts by when cash was physically received
+        // so the admin can see what was collected in that calendar month.
         const payments = rawPayments.filter((p: any) => p.studentId);
 
         const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
