@@ -1,4 +1,4 @@
-import { Schema, model, Model } from 'mongoose';
+import { Schema, model, Model, HydratedDocument } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import config from '../config';
@@ -179,12 +179,12 @@ studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 studentSchema.index({ schoolId: 1, status: 1 });
 
 // Virtual for full name
-studentSchema.virtual('fullName').get(function () {
+studentSchema.virtual('fullName').get(function (this: HydratedDocument<IStudent>) {
     return `${this.firstName} ${this.lastName}`;
 });
 
 // Hash password before save
-studentSchema.pre('save', async function (next) {
+studentSchema.pre('save', async function (this: HydratedDocument<IStudent>, next) {
     if (!this.isModified('password') || !this.password) return next();
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);

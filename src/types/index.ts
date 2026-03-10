@@ -192,6 +192,7 @@ export interface IStudent extends Document {
     totalYearlyFee?: number;
     paidAmount?: number;
     dueAmount?: number;
+    concessionAmount?: number;
     initialDepositAmount?: number;
     depositPaymentMode?: string;
     depositDate?: Date;
