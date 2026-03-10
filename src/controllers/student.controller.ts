@@ -27,6 +27,7 @@ class StudentController {
                     depositDate: req.body.depositDate ? new Date(req.body.depositDate) : undefined,
                     transactionId: req.body.depositTransactionId,
                     staffId: req.user!._id.toString(),
+                    concessionAmount: Number(req.body.concessionAmount) || 0,
                 });
                 const updated = await StudentService.getStudent(req.schoolId!, student._id.toString());
                 res.status(201).json({ success: true, data: updated });

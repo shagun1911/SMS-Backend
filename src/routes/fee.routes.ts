@@ -13,8 +13,9 @@ import { UserRole } from '../types';
 
 const router = Router();
 
-// Student self-serve fee endpoint (uses student JWT)
+// Student self-serve fee endpoints (student JWT)
 router.get('/student/me', protectStudent, FeeController.getStudentFeesForStudent);
+router.get('/student/me/payments', protectStudent, FeeController.getStudentPaymentsForStudent);
 
 router.use(protect, multitenant); // Global middlewares
 

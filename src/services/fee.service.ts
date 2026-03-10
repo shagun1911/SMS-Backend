@@ -77,6 +77,15 @@ class FeeService {
 
         const months = this.getSessionYearMonths(session);
 
+        // Apply student-level concession to monthly fee per month.
+        // concessionAmount reduces the total annual monthly bill; the saving is
+        // spread evenly across all session months.
+        const concession = Number((student as any).concessionAmount) || 0;
+        const sessionMonthCount = months.length || 12;
+        const adjustedMonthlyPerMonth = concession > 0 && monthlyTotal > 0
+            ? Math.max(0, Math.round(((monthlyTotal * sessionMonthCount) - concession) / sessionMonthCount))
+            : monthlyTotal;
+
         // Monthly ledger entries
         for (const m of months) {
             const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
@@ -91,9 +100,9 @@ class FeeService {
                     amount: Number(f.amount) || 0,
                     type: 'monthly',
                 })),
-                totalAmount: monthlyTotal,
+                totalAmount: adjustedMonthlyPerMonth,
                 paidAmount: 0,
-                remainingAmount: monthlyTotal,
+                remainingAmount: adjustedMonthlyPerMonth,
                 status: FeeStatus.PENDING,
                 dueDate: new Date(m.year, m.month, 0, 23, 59, 59), // last day of month
                 payments: [],
@@ -347,8 +356,18 @@ class FeeService {
         return { payment, pdfBuffer };
     }
 
-    async getStudentFeePayments(schoolId: string, studentId: string): Promise<IFeePayment[]> {
-        return await FeePaymentRepository.findByStudent(schoolId, studentId);
+    async getStudentFeePayments(
+        schoolId: string,
+        studentId: string,
+        year?: number,
+        month?: number
+    ): Promise<IFeePayment[]> {
+        const all = await FeePaymentRepository.findByStudent(schoolId, studentId);
+        if (!year || !month) return all;
+        return all.filter((p: any) => {
+            const d = new Date(p.paymentDate);
+            return d.getFullYear() === year && d.getMonth() + 1 === month;
+        });
     }
 
     async getStudentFeeSummary(
@@ -399,7 +418,22 @@ class FeeService {
                             monthlyTotal += item.amount;
                         }
                     }
-                    monthlyFee = monthlyTotal > 0 ? monthlyTotal : undefined;
+
+                    // Apply student-level concession so the Collect Fee modal
+                    // shows the correct per-month amount for this student.
+                    const studentConcession = Number((student as any).concessionAmount) || 0;
+                    let effectiveMonthlyFee = monthlyTotal;
+                    if (studentConcession > 0 && monthlyTotal > 0) {
+                        const sessionMonthCount = session
+                            ? (this.getSessionYearMonths(session).length || 12)
+                            : 12;
+                        effectiveMonthlyFee = Math.max(
+                            0,
+                            Math.round(((monthlyTotal * sessionMonthCount) - studentConcession) / sessionMonthCount)
+                        );
+                    }
+
+                    monthlyFee = effectiveMonthlyFee > 0 ? effectiveMonthlyFee : undefined;
                     oneTimeFee = oneTimeTotal > 0 ? oneTimeTotal : undefined;
 
                     // Back-fill totalYearlyFee on student if it was missing.
@@ -668,10 +702,18 @@ class FeeService {
     async processInitialDeposit(
         schoolId: string,
         student: any,
-        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string; staffId: string }
+        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string; staffId: string; concessionAmount?: number }
     ): Promise<IFeePayment | null> {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) return null;
+
+        // Store concession on student before creating the ledger so that
+        // ensureStudentFeeLedgerForActiveSession can read it and apply adjusted per-month amounts.
+        const concession = Number(data.concessionAmount) || 0;
+        if (concession > 0) {
+            (student as any).concessionAmount = concession;
+            await StudentRepository.update(student._id.toString(), { concessionAmount: concession } as any);
+        }
 
         // Ensure per-month ledger exists for this student in this session.
         // This allows advance payments (e.g. paid in March for April) to reduce April's pending/expected.
@@ -710,14 +752,23 @@ class FeeService {
                     }
                 }
 
-                // Annual = all monthly components for 12 months + all one-time components
-                const computedAnnual = monthlyTotal * 12 + oneTimeTotal;
+                // Apply concession: reduces total annual monthly bill; per-month amount was
+                // already baked into ledger entries via ensureStudentFeeLedgerForActiveSession.
+                const sessionMonthCount = this.getSessionYearMonths(session).length || 12;
+                const adjustedMonthlyAnnual = concession > 0
+                    ? Math.max(0, monthlyTotal * sessionMonthCount - concession)
+                    : monthlyTotal * sessionMonthCount;
+
+                // Annual = adjusted monthly total + all one-time components
+                const computedAnnual = adjustedMonthlyAnnual + oneTimeTotal;
                 if (!totalYearly || totalYearly <= 0) {
-                    totalYearly = computedAnnual || structure.totalAmount || structure.totalAnnualFee || 0;
+                    totalYearly = computedAnnual;
+                } else if (concession > 0) {
+                    // Recalculate if concession was given, overriding any old value
+                    totalYearly = computedAnnual;
                 }
 
-                // Initial deposit should now cover ONLY one-time components
-                // (admission fee, exam fee, etc.), not the first month fee.
+                // Initial deposit covers ONLY one-time components
                 if (oneTimeTotal > 0) {
                     firstMonthFee = oneTimeTotal;
                 }
@@ -765,6 +816,7 @@ class FeeService {
             depositPaymentMode: data.paymentMode,
             depositDate: paymentDate,
             depositTransactionId: data.transactionId,
+            ...(concession > 0 ? { concessionAmount: concession } : {}),
         } as any);
 
         // Allocate the deposit into the ledger:
@@ -1220,18 +1272,36 @@ class FeeService {
         // Exclude deleted students so they don't show as Unknown
         const validFees = (feeRecords as any[]).filter((f) => f.studentId);
 
-        // Stats are based on the per-month StudentFee ledger so they accurately reflect
-        // whether each student's monthly fee has been paid, regardless of when the cash
-        // was physically received (e.g. advance payments collected in a prior month).
-        const totalExpected = validFees.reduce((sum, f) => sum + (Number(f.totalAmount) || 0), 0);
-        const totalCollected = validFees.reduce((sum, f) => sum + (Number(f.paidAmount) || 0), 0);
-        const totalPending = validFees.reduce((sum, f) => sum + (Number(f.remainingAmount) || 0), 0);
+        const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
 
-        // Payment Records table still shows receipts by when cash was physically received
-        // so the admin can see what was collected in that calendar month.
+        // "Collected (Month)" should mean cash physically received in the selected
+        // calendar month, even if that money was adjusted against future months.
         const payments = rawPayments.filter((p: any) => p.studentId);
+        const totalCollected = payments.reduce((sum: number, p: any) => sum + (Number(p.amountPaid) || 0), 0);
 
-        const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+        // "Expected (Month)" should mean what was still due for this academic month
+        // at the start of the selected month. If a student prepaid this month earlier
+        // (e.g. April paid in March), expected becomes 0 for April.
+        const totalExpected = validFees.reduce((sum, f: any) => {
+            const paymentsBeforeMonth = Array.isArray(f.payments)
+                ? f.payments.reduce((inner: number, p: any) => {
+                      const paymentDate = p?.paymentDate ? new Date(p.paymentDate) : null;
+                      if (!paymentDate || Number.isNaN(paymentDate.getTime()) || paymentDate >= monthStart) {
+                          return inner;
+                      }
+                      return inner + (Number(p.amount) || 0);
+                  }, 0)
+                : 0;
+
+            const expectedAtMonthStart = Math.max(0, (Number(f.totalAmount) || 0) - paymentsBeforeMonth);
+            return sum + expectedAtMonthStart;
+        }, 0);
+
+        // "Pending (Month)" is the amount for this academic month still unpaid now.
+        const totalPending = validFees.reduce((sum, f) => sum + Math.max(0, Number(f.remainingAmount) || 0), 0);
+
+        const collectionRate =
+            totalExpected > 0 ? Math.round(((totalExpected - totalPending) / totalExpected) * 100) : 100;
 
         return {
             stats: {

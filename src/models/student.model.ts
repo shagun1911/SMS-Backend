@@ -150,6 +150,7 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         totalYearlyFee: { type: Number, default: 0 },
         paidAmount: { type: Number, default: 0 },
         dueAmount: { type: Number, default: 0 },
+        concessionAmount: { type: Number, default: 0 },
         initialDepositAmount: { type: Number, default: 0 },
         depositPaymentMode: { type: String, trim: true },
         depositDate: { type: Date },

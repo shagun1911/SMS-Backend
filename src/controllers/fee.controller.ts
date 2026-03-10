@@ -124,6 +124,24 @@ class FeeController {
         }
     }
 
+    // GET Student fee receipts (student JWT) with optional month filter
+    async getStudentPaymentsForStudent(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const student = req.student!;
+            const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+            const month = req.query.month ? parseInt(req.query.month as string, 10) : undefined;
+            const payments = await FeeService.getStudentFeePayments(
+                student.schoolId.toString(),
+                student._id.toString(),
+                year,
+                month
+            );
+            sendResponse(res, payments, 'Student fee payments', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
     // GET Fee stats (summary for dashboard)
     async getFeeStats(req: AuthRequest, res: Response, next: NextFunction) {
         try {
