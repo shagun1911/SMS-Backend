@@ -6,6 +6,7 @@ import Student from '../models/student.model';
 import User from '../models/user.model';
 import StudentFee from '../models/studentFee.model';
 import Class from '../models/class.model';
+import School from '../models/school.model';
 import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
 import Plan from '../models/plan.model';
 import { Types } from 'mongoose';
@@ -43,6 +44,23 @@ class SchoolController {
         try {
             const school = await SchoolService.updateSchool(req.schoolId!, req.body);
             sendResponse(res, school, 'School updated successfully', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Public: Get basic school info by school code (for student portal logo)
+     * GET /schools/public/:code
+     */
+    async getPublicByCode(req: Request, res: Response, next: NextFunction) {
+        try {
+            const code = (req.params.code || '').toString().toUpperCase();
+            const school = await School.findOne({ schoolCode: code }).select('schoolName schoolCode logo');
+            if (!school) {
+                return sendResponse(res, null, 'School not found', 404);
+            }
+            return sendResponse(res, school, 'OK', 200);
         } catch (error) {
             next(error);
         }

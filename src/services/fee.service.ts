@@ -16,6 +16,119 @@ import path from 'path';
 import fs from 'fs';
 
 class FeeService {
+    private static readonly MONTHS = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+    ];
+
+    private getSessionYearMonths(session: any): Array<{ year: number; month: number; monthName: string }> {
+        const start = new Date(session.startDate);
+        const end = new Date(session.endDate);
+        const result: Array<{ year: number; month: number; monthName: string }> = [];
+
+        let y = start.getFullYear();
+        let m = start.getMonth() + 1; // 1-based
+        while (y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) {
+            result.push({ year: y, month: m, monthName: FeeService.MONTHS[m - 1] });
+            m++;
+            if (m > 12) {
+                m = 1;
+                y++;
+            }
+        }
+        return result;
+    }
+
+    private async ensureStudentFeeLedgerForActiveSession(schoolId: string, student: any): Promise<void> {
+        const session = await SessionRepository.findActive(schoolId);
+        if (!session) return;
+        if (!student?.class) return;
+
+        const structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
+        if (!structure) return;
+
+        const rawItems: Array<{ title?: string; name?: string; amount: number; type?: string }> =
+            (structure as any).components && (structure as any).components.length > 0
+                ? (structure as any).components
+                : ((structure as any).fees || []).map((f: any) => ({
+                      title: f.title,
+                      amount: f.amount,
+                      type: f.type,
+                  }));
+
+        const monthlyItems = rawItems.filter((x: any) => (x.type || '').toString().toLowerCase() === 'monthly');
+        const oneTimeItems = rawItems.filter((x: any) => {
+            const t = (x.type || '').toString().toLowerCase();
+            return t === 'one-time' || t === 'one_time' || t === 'one time';
+        });
+
+        const monthlyTotal = monthlyItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
+        const oneTimeTotal = oneTimeItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
+
+        const months = this.getSessionYearMonths(session);
+
+        // Monthly ledger entries
+        for (const m of months) {
+            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
+            if (existing) continue;
+            await StudentFeeRepository.create({
+                schoolId: new Types.ObjectId(schoolId) as any,
+                studentId: student._id,
+                sessionId: session._id,
+                month: m.monthName,
+                feeBreakdown: monthlyItems.map((f: any) => ({
+                    title: f.title || f.name || 'Monthly Fee',
+                    amount: Number(f.amount) || 0,
+                    type: 'monthly',
+                })),
+                totalAmount: monthlyTotal,
+                paidAmount: 0,
+                remainingAmount: monthlyTotal,
+                status: FeeStatus.PENDING,
+                dueDate: new Date(m.year, m.month, 0, 23, 59, 59), // last day of month
+                payments: [],
+                discount: 0,
+                lateFee: 0,
+            } as any);
+        }
+
+        // One-time ledger entry (collected at admission)
+        if (oneTimeTotal > 0) {
+            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), 'One-Time');
+            if (!existing) {
+                await StudentFeeRepository.create({
+                    schoolId: new Types.ObjectId(schoolId) as any,
+                    studentId: student._id,
+                    sessionId: session._id,
+                    month: 'One-Time',
+                    feeBreakdown: oneTimeItems.map((f: any) => ({
+                        title: f.title || f.name || 'One-Time Fee',
+                        amount: Number(f.amount) || 0,
+                        type: 'one-time',
+                    })),
+                    totalAmount: oneTimeTotal,
+                    paidAmount: 0,
+                    remainingAmount: oneTimeTotal,
+                    status: FeeStatus.PENDING,
+                    dueDate: new Date(session.startDate),
+                    payments: [],
+                    discount: 0,
+                    lateFee: 0,
+                } as any);
+            }
+        }
+    }
+
     /**
      * Create or Update Fee Structure for a Class
      */
@@ -278,7 +391,11 @@ class FeeService {
     }
 
     async listFeePayments(schoolId: string, limit = 200): Promise<IFeePayment[]> {
-        return await FeePaymentRepository.findPaymentsBySchool(schoolId, limit);
+        const payments = await FeePaymentRepository.findPaymentsBySchool(schoolId, limit);
+
+        // Hide payments for students that have been deleted (studentId failed to populate),
+        // so receipts list does not show \"Unknown\" rows.
+        return payments.filter((p: any) => p.studentId);
     }
 
     async getDefaulters(schoolId: string): Promise<any[]> {
@@ -475,13 +592,18 @@ class FeeService {
     async processInitialDeposit(
         schoolId: string,
         student: any,
-        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string }
+        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string; staffId: string }
     ): Promise<IFeePayment | null> {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) return null;
 
+        // Ensure per-month ledger exists for this student in this session.
+        // This allows advance payments (e.g. paid in March for April) to reduce April's pending/expected.
+        await this.ensureStudentFeeLedgerForActiveSession(schoolId, student);
+
         let totalYearly = student.totalYearlyFee ?? 0;
         let firstMonthFee = 0;
+        let oneTimeTotalFromStructure = 0;
 
         // Derive yearly + first-month fee from fee structure when possible
         if (student.class) {
@@ -522,6 +644,8 @@ class FeeService {
                 if (oneTimeTotal > 0 || monthlyTotal > 0) {
                     firstMonthFee = oneTimeTotal + monthlyTotal;
                 }
+
+                oneTimeTotalFromStructure = oneTimeTotal;
             }
         }
 
@@ -561,6 +685,73 @@ class FeeService {
             depositDate: paymentDate,
             depositTransactionId: data.transactionId,
         } as any);
+
+        // Allocate the deposit into the ledger:
+        // 1) Pay One-Time fees first (if any)
+        // 2) Pay the admission month fee (monthly) next
+        // 3) If there is extra amount, distribute across future months sequentially (advance payment)
+        try {
+            const months = this.getSessionYearMonths(session);
+            const admissionDate = student?.admissionDate ? new Date(student.admissionDate) : paymentDate;
+            const admYear = admissionDate.getFullYear();
+            const admMonth = admissionDate.getMonth() + 1;
+            const admIdx = months.findIndex((m) => m.year === admYear && m.month === admMonth);
+            const startIdx = admIdx >= 0 ? admIdx : 0;
+
+            let remainingToAllocate = initialAmount;
+
+            // One-Time
+            if (oneTimeTotalFromStructure > 0 && remainingToAllocate > 0) {
+                const oneTime = await StudentFeeRepository.findByStudentMonth(
+                    schoolId,
+                    student._id.toString(),
+                    session._id.toString(),
+                    'One-Time'
+                );
+                if (oneTime && oneTime.status !== FeeStatus.PAID) {
+                    const amt = Math.min(remainingToAllocate, oneTime.remainingAmount || 0);
+                    if (amt > 0) {
+                        await this.recordPayment(schoolId, oneTime._id.toString(), {
+                            amount: amt,
+                            mode: (data.paymentMode as any) || 'cash',
+                            staffId: data.staffId,
+                            transactionId: data.transactionId,
+                            receiptNumber,
+                            paymentDate,
+                            remarks: 'Admission (one-time fees)',
+                        } as any);
+                        remainingToAllocate -= amt;
+                    }
+                }
+            }
+
+            // Monthly and advance months
+            for (let i = startIdx; i < months.length && remainingToAllocate > 0; i++) {
+                const m = months[i];
+                const fee = await StudentFeeRepository.findByStudentMonth(
+                    schoolId,
+                    student._id.toString(),
+                    session._id.toString(),
+                    m.monthName
+                );
+                if (!fee || fee.status === FeeStatus.PAID) continue;
+                const amt = Math.min(remainingToAllocate, fee.remainingAmount || 0);
+                if (amt <= 0) continue;
+                await this.recordPayment(schoolId, fee._id.toString(), {
+                    amount: amt,
+                    mode: (data.paymentMode as any) || 'cash',
+                    staffId: data.staffId,
+                    transactionId: data.transactionId,
+                    receiptNumber,
+                    paymentDate,
+                    remarks: i === startIdx ? 'Admission (first month)' : 'Advance fee payment',
+                } as any);
+                remainingToAllocate -= amt;
+            }
+        } catch (_) {
+            // Ledger allocation should not block admission if something goes wrong.
+        }
+
         const school = await SchoolRepository.findById(schoolId);
         if (school) {
             const pdfBuffer = await generateReceiptPDF({
@@ -667,6 +858,8 @@ class FeeService {
             staffId: string;
             remarks?: string;
             transactionId?: string;
+            receiptNumber?: string;
+            paymentDate?: Date;
         }
     ): Promise<IStudentFee> {
         const feeRecord = await StudentFeeRepository.findById(feeId);
@@ -692,8 +885,9 @@ class FeeService {
         // Add Payment
         feeRecord.payments.push({
             amount: paymentData.amount,
-            paymentDate: new Date(),
+            paymentDate: paymentData.paymentDate ? new Date(paymentData.paymentDate) : new Date(),
             paymentMode: paymentData.mode,
+            receiptNumber: paymentData.receiptNumber,
             receivedBy: new Types.ObjectId(paymentData.staffId) as any,
             remarks: paymentData.remarks,
             transactionId: paymentData.transactionId,
@@ -758,39 +952,80 @@ class FeeService {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) throw new ErrorResponse('No active session found', 400);
 
-        const month = payload.month || new Date().toLocaleString('default', { month: 'long' });
-        let feeRecord = await StudentFeeRepository.findByStudentMonth(
-            schoolId,
-            payload.studentId,
-            session._id.toString(),
-            month
-        );
-
-        if (!feeRecord) {
-            feeRecord = await StudentFeeRepository.create({
-                schoolId: new Types.ObjectId(schoolId) as any,
-                studentId: new Types.ObjectId(payload.studentId) as any,
-                sessionId: session._id,
-                month,
-                feeBreakdown: [{ title: payload.feeTitle || 'Fee', amount: payload.amount, type: 'monthly' }],
-                totalAmount: payload.amount,
-                paidAmount: 0,
-                remainingAmount: payload.amount,
-                status: FeeStatus.PENDING,
-                dueDate: new Date(),
-                payments: [],
-                discount: 0,
-                lateFee: 0,
-            } as any);
+        const targetMonthName = payload.month || new Date().toLocaleString('default', { month: 'long' });
+        const months = this.getSessionYearMonths(session);
+        const targetIndex = months.findIndex((m) => m.monthName === targetMonthName);
+        if (targetIndex < 0) {
+            throw new ErrorResponse(`Invalid month: ${targetMonthName}`, 400);
         }
 
-        return await this.recordPayment(schoolId, feeRecord._id.toString(), {
-            amount: payload.amount,
-            mode: payload.mode,
-            staffId: payload.staffId,
+        // Ensure ledger exists so we have one row per month.
+        const student = await StudentRepository.findById(payload.studentId);
+        if (student) {
+            await this.ensureStudentFeeLedgerForActiveSession(schoolId, student);
+        }
+
+        const allFees = await StudentFee.find({
+            schoolId: new Types.ObjectId(schoolId),
+            sessionId: session._id,
+            studentId: new Types.ObjectId(payload.studentId),
+        }).exec();
+        const monthToFee: Record<string, any> = {};
+        for (const fee of allFees as any[]) {
+            monthToFee[(fee.month || '').toString()] = fee;
+        }
+
+        let remaining = payload.amount;
+        let lastUpdatedFee: IStudentFee | null = null;
+
+        for (let i = 0; i <= targetIndex && remaining > 0; i++) {
+            const m = months[i];
+            const fee = monthToFee[m.monthName];
+            if (!fee || fee.status === FeeStatus.PAID) continue;
+
+            const remainingForMonth =
+                (fee.totalAmount || 0) + (fee.lateFee || 0) - (fee.discount || 0) - (fee.paidAmount || 0);
+            const amtForMonth = Math.min(remaining, remainingForMonth);
+            if (amtForMonth <= 0) continue;
+
+            lastUpdatedFee = await this.recordPayment(schoolId, fee._id.toString(), {
+                amount: amtForMonth,
+                mode: payload.mode,
+                staffId: payload.staffId,
+                transactionId: payload.transactionId,
+                remarks: payload.remarks,
+            });
+            remaining -= amtForMonth;
+        }
+
+        if (remaining > 0.01) {
+            // User is trying to pay more than the due up to the selected month.
+            throw new ErrorResponse('Payment exceeds remaining amount for selected months', 400);
+        }
+
+        if (!lastUpdatedFee) {
+            throw new ErrorResponse('No pending fees found for selected months', 400);
+        }
+
+        // Create a FeePayment record so the receipt appears in the month
+        // when the cash was actually received (based on paymentDate).
+        const yearPrefix = session.sessionYear ? session.sessionYear.split('-')[0] : String(new Date().getFullYear());
+        const receiptNumber = await FeePaymentRepository.getNextReceiptNumber(schoolId, yearPrefix);
+        const paymentDate = new Date();
+
+        await FeePaymentRepository.create({
+            schoolId: new Types.ObjectId(schoolId) as any,
+            studentId: new Types.ObjectId(payload.studentId) as any,
+            receiptNumber,
+            amountPaid: payload.amount,
+            paymentMode: payload.mode,
+            paymentDate,
+            previousDue: 0,
+            remainingDue: 0,
             transactionId: payload.transactionId,
-            remarks: payload.remarks,
-        });
+        } as any);
+
+        return lastUpdatedFee;
     }
 
     /**
@@ -876,27 +1111,43 @@ class FeeService {
         stats: { totalCollected: number; totalExpected: number; totalPending: number; collectionRate: number; transactionCount: number };
         payments: IFeePayment[];
     }> {
-        const schoolObjId = new Types.ObjectId(schoolId);
-        const [payments, expectedResult, collectedTillMonth] = await Promise.all([
-            // Payments in the selected month
+        const session = await SessionRepository.findActive(schoolId);
+        if (!session) throw new ErrorResponse('No active session found', 400);
+
+        const months = this.getSessionYearMonths(session);
+        const selected = months.find((m) => m.year === year && m.month === month);
+        if (!selected) {
+            // If user selects a month outside the active session, just return empty stats.
+            return {
+                stats: { totalCollected: 0, totalExpected: 0, totalPending: 0, collectionRate: 0, transactionCount: 0 },
+                payments: [],
+            };
+        }
+
+        const [feeRecords, rawPayments] = await Promise.all([
+            StudentFee.find({
+                schoolId: new Types.ObjectId(schoolId),
+                sessionId: session._id,
+                month: selected.monthName,
+            })
+                .populate('studentId', 'firstName lastName admissionNumber class section')
+                .lean(),
+            // Payments whose cash date falls in this calendar month
             FeePaymentRepository.findPaymentsByMonth(schoolId, year, month),
-            // Expected amount per month across active students
-            Student.aggregate([
-                { $match: { schoolId: schoolObjId, isActive: true, totalYearlyFee: { $gt: 0 } } },
-                { $group: { _id: null, total: { $sum: { $divide: ['$totalYearlyFee', 12] } } } },
-            ]),
-            // Total collected from the start of the year up to the end of this month
-            FeePaymentRepository.sumPaymentsUpToMonth(schoolId, year, month),
         ]);
 
-        const totalCollected = payments.reduce((sum, p) => sum + (p.amountPaid ?? 0), 0);
-        const perMonthExpected = expectedResult[0]?.total ?? 0;
-        const totalExpected = perMonthExpected;
+        // Exclude deleted students so they don't show as Unknown
+        const validFees = (feeRecords as any[]).filter((f) => f.studentId);
 
-        // Cumulative expected till this month vs cumulative collected till this month
-        const expectedTillMonth = perMonthExpected * month;
-        const totalPending = Math.max(0, expectedTillMonth - collectedTillMonth);
-        const collectionRate = expectedTillMonth > 0 ? Math.round((collectedTillMonth / expectedTillMonth) * 100) : 0;
+        const totalExpected = validFees.reduce((sum, f) => sum + (Number(f.totalAmount) || 0), 0);
+        const totalCollected = validFees.reduce((sum, f) => sum + (Number(f.paidAmount) || 0), 0);
+        const totalPending = validFees.reduce((sum, f) => sum + (Number(f.remainingAmount) || 0), 0);
+
+        // Payments table is grouped by when the cash was actually received,
+        // so we use FeePayment records filtered by paymentDate month.
+        const payments = rawPayments.filter((p: any) => p.studentId);
+
+        const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
 
         return {
             stats: {

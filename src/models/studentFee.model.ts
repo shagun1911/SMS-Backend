@@ -24,13 +24,16 @@ const studentFeeSchema = new Schema<IStudentFee, IStudentFeeModel>(
             type: String, // e.g., "April", "May" or "One-Time"
             required: true,
         },
-        feeBreakdown: [
-            {
-                title: String,
-                amount: Number,
-                type: String,
-            },
-        ],
+        feeBreakdown: {
+            type: [
+                {
+                    title: { type: String },
+                    amount: { type: Number },
+                    type: { type: String },
+                },
+            ],
+            default: [],
+        },
         totalAmount: {
             type: Number,
             required: true,

@@ -8,6 +8,9 @@ const router = Router();
 // Public registration
 router.post('/register', SchoolController.register);
 
+// Public school info (for student/parent portals)
+router.get('/public/:code', SchoolController.getPublicByCode);
+
 // Protected routes
 router.use(protect);
 router.use(multitenant);

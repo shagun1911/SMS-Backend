@@ -26,6 +26,7 @@ class StudentController {
                     paymentMode: req.body.paymentMode || req.body.depositPaymentMode || 'cash',
                     depositDate: req.body.depositDate ? new Date(req.body.depositDate) : undefined,
                     transactionId: req.body.depositTransactionId,
+                    staffId: req.user!._id.toString(),
                 });
                 const updated = await StudentService.getStudent(req.schoolId!, student._id.toString());
                 res.status(201).json({ success: true, data: updated });

@@ -4,6 +4,8 @@ import SchoolRepository from '../repositories/school.repository';
 import SessionRepository from '../repositories/session.repository';
 import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
+import StudentFee from '../models/studentFee.model';
+import FeePayment from '../models/feePayment.model';
 import { getTenantFilter } from '../utils/tenant';
 import { updateUsageForSchool } from './usage.service';
 
@@ -154,6 +156,13 @@ class StudentService {
             });
         } else {
             await StudentRepository.delete(id);
+
+            // Also remove fee-related data so deleted students do not appear as "Unknown" in fee reports.
+            // This cascades the deletion to StudentFee and FeePayment documents for this student.
+            await Promise.all([
+                StudentFee.deleteMany({ schoolId, studentId: id }),
+                FeePayment.deleteMany({ schoolId, studentId: id }),
+            ]);
         }
 
         await updateUsageForSchool(schoolId);
