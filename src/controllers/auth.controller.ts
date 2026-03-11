@@ -161,6 +161,29 @@ class AuthController {
         }
     }
 
+    async verifyPassword(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { password } = req.body;
+            if (!password) {
+                return next(new ErrorResponse('Please provide password', 400));
+            }
+
+            const user = await User.findById((req as any).user.id).select('+password');
+            if (!user) {
+                return next(new ErrorResponse('User not found', 404));
+            }
+
+            const isMatch = await (user as any).matchPassword(password);
+            if (!isMatch) {
+                return next(new ErrorResponse('Invalid password', 401));
+            }
+
+            res.status(200).json({ success: true, message: 'Password verified' });
+        } catch (error) {
+            next(error);
+        }
+    }
+
     /**
    * Refresh Token
    */

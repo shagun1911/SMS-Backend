@@ -1,4 +1,5 @@
 import { Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
 import User from '../models/user.model';
 import Salary from '../models/salary.model';
 import SalaryStructure from '../models/salaryStructure.model';
@@ -19,6 +20,26 @@ class UserController {
                 return res.status(200).json({ success: true, count: 0, data: [] });
             }
             const users = await User.find({ schoolId }).sort({ role: 1, name: 1 });
+
+            // Backfill plainPassword for users that don't have it yet
+            const needsBackfill = users.filter(u => !u.plainPassword);
+            if (needsBackfill.length > 0) {
+                const withHash = await User.find({
+                    _id: { $in: needsBackfill.map(u => u._id) },
+                }).select('+password');
+
+                for (const u of withHash) {
+                    const firstName = (u.name || '').split(' ')[0].toLowerCase() || 'staff';
+                    const phoneLast4 = (u.phone || '').slice(-4) || '1234';
+                    const defaultPwd = firstName + phoneLast4;
+                    const matches = await bcrypt.compare(defaultPwd, u.password);
+                    if (matches) {
+                        await User.updateOne({ _id: u._id }, { plainPassword: defaultPwd });
+                        const original = users.find(x => x._id.toString() === u._id.toString());
+                        if (original) (original as any).plainPassword = defaultPwd;
+                    }
+                }
+            }
 
             return res.status(200).json({
                 success: true,
@@ -74,6 +95,7 @@ class UserController {
                 const phoneLast4 = (req.body.phone || '').slice(-4) || '1234';
                 req.body.password = firstName + phoneLast4;
             }
+            req.body.plainPassword = req.body.password;
 
             const user = await User.create(req.body);
 
@@ -163,6 +185,7 @@ class UserController {
             }
 
             user.password = password;
+            (user as any).plainPassword = password;
             (user as any).mustChangePassword = true;
             await user.save();
 

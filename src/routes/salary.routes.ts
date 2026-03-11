@@ -24,6 +24,13 @@ router.get(
     SalaryController.getSummary
 );
 
+// Logged-in staff (e.g. teacher) can view their own salary history
+// Must be before any /:param routes so "my" isn't treated as a salaryId
+router.get(
+    '/my/history',
+    SalaryController.getMySalaryHistory
+);
+
 router.post(
     '/generate',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN),

@@ -104,6 +104,20 @@ class SalaryController {
             next(error);
         }
     }
+
+    // GET Logged-in teacher's Salary History
+    async getMySalaryHistory(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const staffId = req.user?._id?.toString();
+            if (!staffId) {
+                return next(new Error('User context missing'));
+            }
+            const records = await SalaryService.getStaffSalaryHistory(req.schoolId!, staffId);
+            sendResponse(res, records, 'My Salary History Retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new SalaryController();
