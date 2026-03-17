@@ -7,6 +7,10 @@ export interface IBus extends Document {
     routeName: string;
     capacity: number;
     driverId?: Schema.Types.ObjectId;
+    driverName?: string;
+    driverPhone?: string;
+    conductorName?: string;
+    conductorPhone?: string;
     isActive: boolean;
 }
 
@@ -42,6 +46,22 @@ const busSchema = new Schema<IBus>(
         driverId: {
             type: Schema.Types.ObjectId,
             ref: 'Driver',
+        },
+        driverName: {
+            type: String,
+            trim: true,
+        },
+        driverPhone: {
+            type: String,
+            trim: true,
+        },
+        conductorName: {
+            type: String,
+            trim: true,
+        },
+        conductorPhone: {
+            type: String,
+            trim: true,
         },
         isActive: {
             type: Boolean,

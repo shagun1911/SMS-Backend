@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types';
 import Bus from '../models/bus.model';
+import Student from '../models/student.model';
 import { getTenantFilter } from '../utils/tenant';
 import { sendResponse } from '../utils/response';
 
@@ -22,6 +23,116 @@ class TransportController {
                 schoolId: req.schoolId
             });
             sendResponse(res, vehicle, 'Vehicle added', 201);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async getBusDetails(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const filter = getTenantFilter(req.schoolId!);
+            const busId = req.params.busId;
+
+            const bus = await Bus.findOne({ ...filter, _id: busId });
+            if (!bus) {
+                return sendResponse(res, null as any, 'Bus not found', 404);
+            }
+
+            const students = await Student.find({
+                ...filter,
+                usesTransport: true,
+                busId: bus._id,
+            }).select('firstName lastName admissionNumber class section rollNumber phone username');
+
+            sendResponse(
+                res,
+                { bus, students },
+                'Bus details retrieved',
+                200
+            );
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async updateVehicle(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const filter = getTenantFilter(req.schoolId!);
+            const busId = req.params.busId;
+
+            const updated = await Bus.findOneAndUpdate(
+                { ...filter, _id: busId },
+                {
+                    $set: {
+                        busNumber: req.body.busNumber,
+                        registrationNumber: req.body.registrationNumber,
+                        routeName: req.body.routeName,
+                        capacity: req.body.capacity,
+                        isActive: req.body.isActive,
+                        driverName: req.body.driverName,
+                        driverPhone: req.body.driverPhone,
+                        conductorName: req.body.conductorName,
+                        conductorPhone: req.body.conductorPhone,
+                    },
+                },
+                { new: true }
+            );
+
+            if (!updated) return sendResponse(res, null as any, 'Bus not found', 404);
+            sendResponse(res, updated, 'Vehicle updated', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async assignStudentsToBus(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const filter = getTenantFilter(req.schoolId!);
+            const busId = req.params.busId;
+            const studentIds: string[] = Array.isArray(req.body?.studentIds) ? req.body.studentIds : [];
+            if (studentIds.length === 0) {
+                return sendResponse(res, { assigned: 0 }, 'No students selected', 200);
+            }
+
+            const bus = await Bus.findOne({ ...filter, _id: busId }).select('_id');
+            if (!bus) return sendResponse(res, null as any, 'Bus not found', 404);
+
+            const result = await Student.updateMany(
+                { ...filter, _id: { $in: studentIds } },
+                { $set: { usesTransport: true, busId: bus._id } }
+            );
+
+            sendResponse(
+                res,
+                { assigned: (result as any).modifiedCount ?? (result as any).nModified ?? 0 },
+                'Students assigned to bus',
+                200
+            );
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    async unassignStudentsFromBus(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const filter = getTenantFilter(req.schoolId!);
+            const busId = req.params.busId;
+            const studentIds: string[] = Array.isArray(req.body?.studentIds) ? req.body.studentIds : [];
+            if (studentIds.length === 0) {
+                return sendResponse(res, { unassigned: 0 }, 'No students selected', 200);
+            }
+
+            const result = await Student.updateMany(
+                { ...filter, _id: { $in: studentIds }, busId },
+                { $set: { usesTransport: false }, $unset: { busId: 1 } }
+            );
+
+            sendResponse(
+                res,
+                { unassigned: (result as any).modifiedCount ?? (result as any).nModified ?? 0 },
+                'Students unassigned from bus',
+                200
+            );
         } catch (error) {
             next(error);
         }
