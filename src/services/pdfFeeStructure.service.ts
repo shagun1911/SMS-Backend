@@ -2,6 +2,7 @@
 import PDFDocument from 'pdfkit';
 import { IFeeStructure, ISchool, ISession } from '../types';
 import { fetchImageBuffer } from '../utils/fetchImage';
+import fs from 'fs';
 
 const M = 28;
 const PW = 595;
@@ -35,6 +36,43 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
 
+    // Ensure rupee symbol renders correctly in PDF.
+    // Using explicit unicode codepoint avoids cases where it shows as a weird character (e.g. "¹").
+    const RUPEE = '\u20B9';
+
+    // pdfkit standard fonts (Helvetica etc.) may not include the rupee glyph on all platforms.
+    // Try to register a Unicode font so U+20B9 renders properly.
+    const FONT_REG = 'SMS_UNICODE_REG';
+    const FONT_BOLD = 'SMS_UNICODE_BOLD';
+    const regularCandidates = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    ];
+    const boldCandidates = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+    ];
+    const pickFirstExisting = (cands: string[]) => cands.find((p) => fs.existsSync(p)) || null;
+    const regularFontPath = pickFirstExisting(regularCandidates);
+    const boldFontPath = pickFirstExisting(boldCandidates);
+    let fontRegular = 'Helvetica';
+    let fontBold = 'Helvetica-Bold';
+    try {
+        if (regularFontPath) {
+            doc.registerFont(FONT_REG, regularFontPath);
+            fontRegular = FONT_REG;
+        }
+        if (boldFontPath) {
+            doc.registerFont(FONT_BOLD, boldFontPath);
+            fontBold = FONT_BOLD;
+        }
+        doc.font(fontRegular);
+    } catch {
+        // If font registration fails, fall back to standard fonts.
+    }
+
     const [logoBuf, stampBuf, sigBuf] = await Promise.all([
         fetchImageBuffer(school.logo),
         fetchImageBuffer((school as any).stamp),
@@ -56,13 +94,22 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     const totalAnnual = structure.totalAmount ?? structure.totalAnnualFee
         ?? items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
 
-    const quarterly = Math.ceil(totalAnnual / 4);
-    const halfYearly = Math.ceil(totalAnnual / 2);
-    const monthly = Math.ceil(totalAnnual / 12);
+    // Payment schedule must be based only on recurring monthly components.
+    // Exclude one-time components from Monthly/Quarterly/Half-Yearly/Yearly calculations.
+    const recurringAnnual = items
+        .filter((i: any) => (i.type || "").toString() !== "one-time")
+        .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0) * 12, 0);
+    const recurringMonthly = items
+        .filter((i: any) => (i.type || "").toString() !== "one-time")
+        .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0), 0);
 
-    // ── OUTER BORDER ──────────────────────────────────────────────────────────
-    doc.rect(8, 8, PW - 16, 826).lineWidth(2).strokeColor('#1a237e').stroke();
-    doc.rect(11, 11, PW - 22, 820).lineWidth(0.5).strokeColor('#9fa8da').stroke();
+    const quarterly = Math.ceil(recurringAnnual / 4);
+    const halfYearly = Math.ceil(recurringAnnual / 2);
+    const monthly = Math.ceil(recurringMonthly);
+
+    // ── OUTER BORDER (soft / pastel) ──────────────────────────────────────────
+    doc.rect(8, 8, PW - 16, 826).lineWidth(2).strokeColor('#4f46e5').stroke();
+    doc.rect(11, 11, PW - 22, 820).lineWidth(0.5).strokeColor('#c7d2fe').stroke();
 
     let y = 22;
 
@@ -78,7 +125,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     const addr = [school.address?.street, school.address?.city, school.address?.state, school.address?.pincode].filter(Boolean).join(', ');
     const contact = [school.phone ? `Ph: ${school.phone}` : '', school.email || ''].filter(Boolean).join('   |   ');
 
-    doc.fontSize(19).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.fontSize(19).font(fontBold).fillColor('#4f46e5');
     doc.text(schoolName, M + LOGO_SZ + 8, y + 4, { width: CW - LOGO_SZ - 8, align: 'center' });
 
     if (board) {
@@ -90,29 +137,52 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     doc.text(contact || '—', M + LOGO_SZ + 8, y + (board ? 52 : 42), { width: CW - LOGO_SZ - 8, align: 'center' });
 
     y += LOGO_SZ + 12;
-    hLine(doc, y, '#1a237e', 1.5);
+    hLine(doc, y, '#4f46e5', 1.5);
     y += 2;
 
     // ── TITLE BAR ──────────────────────────────────────────────────────────────
-    doc.rect(M, y, CW, 22).fill('#1a237e');
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.rect(M, y, CW, 22).fill('#4f46e5');
+    doc.fontSize(12).font(fontBold).fillColor('#ffffff');
     doc.text('FEE STRUCTURE', M, y + 5, { width: CW, align: 'center' });
     y += 22;
 
     // ── SESSION + CLASS BANNER ────────────────────────────────────────────────
-    doc.rect(M, y, CW, 20).fill('#e8eaf6');
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.rect(M, y, CW, 20).fill('#eef2ff');
+    doc.fontSize(9).font(fontBold).fillColor('#4f46e5');
     doc.text(`Session: ${sessionLabel}`, M + 8, y + 5, { width: CW / 2 - 16 });
     doc.text(`Class: ${structure.class || '—'}`, M + CW / 2, y + 5, { width: CW / 2 - 8, align: 'right' });
     hLine(doc, y + 20, '#9fa8da', 0.5);
     y += 20;
 
     // ── FEE MONTHS LABEL ─────────────────────────────────────────────────────
-    doc.rect(M, y, CW, 18).fill('#fff9c4');
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#e65100');
+    doc.rect(M, y, CW, 18).fill('#fef9c3');
+    doc.fontSize(8).font(fontBold).fillColor('#f97316');
     doc.text('Due Months:', M + 8, y + 4, { width: 75 });
     doc.font('Helvetica').fillColor('#333333');
-    doc.text('Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar  (12 Months)', M + 86, y + 4, { width: CW - 100 });
+    // Show due months based on active session range (e.g., Mar..Dec, Jan..Feb).
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const start = session?.startDate ? new Date(session.startDate) : null;
+    const end = session?.endDate ? new Date(session.endDate) : null;
+
+    let dueMonths: string[] = MONTHS;
+    if (start && end && !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+        dueMonths = [];
+        let yy = start.getFullYear();
+        let mm = start.getMonth(); // 0-based
+        while (yy < end.getFullYear() || (yy === end.getFullYear() && mm <= end.getMonth())) {
+            dueMonths.push(MONTHS[mm]);
+            mm++;
+            if (mm > 11) {
+                mm = 0;
+                yy++;
+            }
+            // safety guard
+            if (dueMonths.length > 24) break;
+        }
+    }
+
+    const dueMonthsText = `${dueMonths.join(', ')}  (${dueMonths.length} Months)`;
+    doc.text(dueMonthsText, M + 86, y + 4, { width: CW - 100 });
     hLine(doc, y + 18, '#9fa8da', 0.5);
     y += 18;
 
@@ -126,13 +196,13 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     const colName = CW - colSNo - colType - colAmt - colMonthly;
 
     // Header
-    doc.rect(M, y, CW, 22).fill('#37474f');
-    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.rect(M, y, CW, 22).fill('#334155');
+    doc.fontSize(8.5).font(fontBold).fillColor('#ffffff');
     doc.text('S.No', M + 6, y + 6, { width: colSNo - 8, align: 'center' });
     doc.text('Fee Component', M + colSNo + 6, y + 6, { width: colName - 8 });
     doc.text('Type', M + colSNo + colName + 6, y + 6, { width: colType - 8, align: 'center' });
-    doc.text('Per Month (₹)', M + colSNo + colName + colType + 4, y + 6, { width: colMonthly - 8, align: 'right' });
-    doc.text('Annual (₹)', M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
+    doc.text(`Per Month (${RUPEE})`, M + colSNo + colName + colType + 4, y + 6, { width: colMonthly - 8, align: 'right' });
+    doc.text(`Annual (${RUPEE})`, M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
     y += 22;
 
     doc.fontSize(8.5);
@@ -157,7 +227,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
         doc.text(item.name, M + colSNo + 6, y + 4, { width: colName - 8 });
 
         const typeLabel = item.type === 'one-time' ? 'One-time' : 'Monthly';
-        const typeColor = item.type === 'one-time' ? '#e65100' : '#1565c0';
+        const typeColor = item.type === 'one-time' ? '#f97316' : '#2563eb';
         doc.fillColor(typeColor).text(typeLabel, M + colSNo + colName + 6, y + 4, { width: colType - 8, align: 'center' });
 
         doc.fillColor('#212121');
@@ -169,47 +239,50 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     });
 
     // Total Row
-    doc.rect(M, y, CW, 22).fill('#1a237e');
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.rect(M, y, CW, 22).fill('#4f46e5');
+    doc.fontSize(9).font(fontBold).fillColor('#ffffff');
     doc.text('TOTAL ANNUAL FEE', M + colSNo + 6, y + 6, { width: colName + colType + colMonthly - 8 });
-    doc.text(`₹ ${money(totalAnnual)}`, M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
+    doc.text(`${RUPEE} ${money(totalAnnual)}`, M + colSNo + colName + colType + colMonthly + 4, y + 6, { width: colAmt - 10, align: 'right' });
     y += 22;
 
     y += 12;
 
     // ── PAYMENT SCHEDULE ──────────────────────────────────────────────────────
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.fontSize(10).font(fontBold).fillColor('#4f46e5');
     doc.text('Payment Schedule Options', M, y);
-    y += 4;
-    hLine(doc, y, '#9fa8da', 0.8);
+    // Ensure the divider line does not cut through the title text.
     y += 10;
+    hLine(doc, y, '#c7d2fe', 0.8);
+    y += 12;
 
     const schedRows = [
-        { label: 'Monthly', value: monthly, note: 'per month × 12' },
-        { label: 'Quarterly', value: quarterly, note: 'per quarter × 4' },
-        { label: 'Half-Yearly', value: halfYearly, note: 'per installment × 2' },
-        { label: 'Yearly (Full)', value: totalAnnual, note: 'lump sum — full year' },
+        { label: 'Monthly', value: monthly, note: 'recurring monthly fees' },
+        { label: 'Quarterly', value: quarterly, note: 'recurring for 3 months' },
+        { label: 'Half-Yearly', value: halfYearly, note: 'recurring for 6 months' },
+        { label: 'Yearly (Full)', value: recurringAnnual, note: 'recurring lump sum — full year' },
     ];
 
     const schedColW = CW / 4;
     schedRows.forEach((s, i) => {
         const sx = M + i * schedColW;
-        doc.rect(sx, y, schedColW - 4, 52).fillAndStroke(i % 2 === 0 ? '#e3f2fd' : '#e8f5e9', '#90caf9');
-        doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#1a237e');
+        const bg = ['#e0e7ff', '#d1fae5', '#fef3c7', '#fce7f3'][i] ?? '#e0e7ff';
+        const border = ['#a5b4fc', '#34d399', '#fbbf24', '#f9a8d4'][i] ?? '#a5b4fc';
+        doc.rect(sx, y, schedColW - 4, 52).fillAndStroke(bg, border);
+        doc.fontSize(8.5).font(fontBold).fillColor('#4f46e5');
         doc.text(s.label, sx + 6, y + 8, { width: schedColW - 16, align: 'center' });
-        doc.fontSize(13).font('Helvetica-Bold').fillColor('#1565c0');
-        doc.text(`₹${money(s.value)}`, sx + 4, y + 22, { width: schedColW - 12, align: 'center' });
+        doc.fontSize(13).font(fontBold).fillColor('#2563eb');
+        doc.text(`${RUPEE}${money(s.value)}`, sx + 4, y + 22, { width: schedColW - 12, align: 'center' });
         doc.fontSize(7.5).font('Helvetica').fillColor('#546e7a');
         doc.text(s.note, sx + 4, y + 40, { width: schedColW - 12, align: 'center' });
     });
     y += 60;
 
     // ── TERMS & CONDITIONS ────────────────────────────────────────────────────
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.fontSize(9).font(fontBold).fillColor('#4f46e5');
     doc.text('Terms & Conditions', M, y);
-    y += 4;
-    hLine(doc, y, '#9fa8da', 0.6);
-    y += 8;
+    y += 7;
+    hLine(doc, y, '#c7d2fe', 0.6);
+    y += 10;
 
     const terms = [
         'Fees once paid are non-refundable under any circumstances.',
@@ -219,7 +292,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
         'For any fee-related queries, contact the accounts office.',
     ];
 
-    doc.fontSize(8.5).font('Helvetica').fillColor('#424242');
+    doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
     terms.forEach(term => {
         doc.text(`•  ${term}`, M + 8, y, { width: CW - 16 });
         y += 14;
@@ -228,7 +301,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     y += 8;
 
     // ── FOOTER ────────────────────────────────────────────────────────────────
-    hLine(doc, y, '#9fa8da', 0.6);
+    hLine(doc, y, '#c7d2fe', 0.6);
     y += 10;
 
     if (sigBuf) {
