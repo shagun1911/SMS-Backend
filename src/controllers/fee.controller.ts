@@ -296,7 +296,8 @@ class FeeController {
     // GET List fee payments (receipts)
     async listPayments(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const payments = await FeeService.listFeePayments(req.schoolId!, 200);
+            const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : undefined;
+            const payments = await FeeService.listFeePayments(req.schoolId!, 200, studentId);
             sendResponse(res, payments, 'Payments retrieved', 200);
         } catch (error) {
             next(error);

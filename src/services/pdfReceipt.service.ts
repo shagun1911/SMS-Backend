@@ -17,6 +17,8 @@ export interface ReceiptPDFOptions {
     thisPayment: number;
     remainingDue: number;
     sessionYear?: string;
+    // Academic month for which this receipt amount was applied (e.g. "March" or "One-Time")
+    feeMonth?: string;
     feeComponents?: Array<{ name: string; amount: number }>;
     concession?: number;
     lateFee?: number;
@@ -47,8 +49,14 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
     const {
         school, payment, student,
         totalAnnualFee, thisPayment, remainingDue, previousPaid = 0,
-        sessionYear, feeComponents, concession = 0, lateFee = 0,
+        sessionYear, feeMonth, feeComponents, concession = 0, lateFee = 0,
     } = opts;
+
+    // The student-level concession (typically applied at admission) is often already reflected
+    // in `student.totalYearlyFee`. So we use it for the display row only, without impacting
+    // the current net-fee calculation.
+    const concessionDisplay = Number((student as any).concessionAmount) || 0;
+    const concessionValueForRow = concessionDisplay > 0 ? concessionDisplay : concession;
 
     const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
     const chunks: Buffer[] = [];
@@ -119,11 +127,19 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
     const phone = (student as any).phone || '';
     const rollNo = (student as any).rollNumber || '—';
 
+    const feeMonthDisplay = (() => {
+        const m = (feeMonth || '').toString();
+        if (!m) return sessionYear ? 'Apr–Mar (12 Months)' : '—';
+        if (m.toLowerCase() === 'one-time' || m.toLowerCase() === 'one_time') return 'Admission (One-time)';
+        // Expected values here are like "January", "February", ..., "March", etc.
+        return m;
+    })();
+
     const detailRows: [string, string, string, string][] = [
         ['Name', studentName || '—', 'SID', student.admissionNumber || '—'],
         ["Father's Name", student.fatherName || '—', 'Mobile', phone || '—'],
         ["Mother's Name", motherName || '—', 'Class / Section', `${student.class || '—'} - ${student.section || '—'}`],
-        ['Roll No', String(rollNo), 'Fee Month', sessionYear ? 'Apr–Mar (12 Months)' : '—'],
+        ['Roll No', String(rollNo), 'Fee Upto Month', feeMonthDisplay],
     ];
 
     // Bigger row height so long values (like Father/Mother names or Class-Section)
@@ -205,7 +221,7 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
             bold: false,
         },
         { label: '(+) Additional / Late Fee', value: lateFee, fg: '#ea580c', bg: '#ffedd5', bold: false },
-        { label: '(-) Concession / Discount', value: concession, fg: '#15803d', bg: '#dcfce7', bold: false },
+        { label: '(-) Concession / Discount', value: concessionValueForRow, fg: '#15803d', bg: '#dcfce7', bold: false },
         { label: 'NET FEE', value: netFee, fg: '#ffffff', bg: '#4f46e5', bold: true },
         ...(previousPaid > 0 ? [{ label: '(+) Paid at Admission', value: previousPaid, fg: '#15803d', bg: '#dcfce7', bold: false }] : []),
         { label: previousPaid > 0 ? 'AMOUNT RECEIVED (This Payment)' : 'AMOUNT RECEIVED', value: thisPayment, fg: '#ffffff', bg: '#16a34a', bold: true },
@@ -247,8 +263,13 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
 
     doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#4f46e5')
         .text('Total Paid:', midX, pInfoY, { width: 105, align: 'left' });
-    doc.fontSize(7.5).font('Helvetica').fillColor('#111827')
-        .text(`₹${money(thisPayment)}`, midX + 105, pInfoY, { width: rightW - 105, align: 'right' });
+    // Anchor the value to the right edge of the payment box to avoid overflow.
+    const totalPaidStr = `₹${money(thisPayment)}`;
+    doc.fontSize(7.5).font('Helvetica').fillColor('#111827');
+    const totalPaidTextW = doc.widthOfString(totalPaidStr);
+    const totalPaidValueRightX = M + CW - 10; // right padding inside the box
+    const totalPaidValueX = totalPaidValueRightX - totalPaidTextW;
+    doc.text(totalPaidStr, totalPaidValueX, pInfoY, { align: 'left' });
 
     // Row 2: Amount in Word (full width)
     const amountRowY = pInfoY + 12;

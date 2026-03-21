@@ -3,7 +3,7 @@ import PDFDocument from 'pdfkit';
 import { ISchool } from '../types';
 import { fetchImageBuffer } from '../utils/fetchImage';
 
-// A4 = 595 × 842 pt. Two admit cards per page, each ~400 pt tall.
+// A4 = 595 × 842 pt. Single admit card per page.
 const PW = 595;
 const CARD_H = 400;
 const M = 22; // outer margin per card
@@ -51,6 +51,7 @@ async function drawCard(
     doc: any,
     logoBuf: Buffer | null,
     photoBuf: Buffer | null,
+    principalSigBuf: Buffer | null,
     opts: AdmitCardPDFOptions,
     yOffset: number
 ) {
@@ -83,9 +84,9 @@ async function drawCard(
     }
 
     doc.fontSize(8).font('Helvetica').fillColor('#333333');
-    doc.text(`📍 ${addr || '—'}`, M + LOGO_SZ + 18, y + (board ? 33 : 23), { width: CW - LOGO_SZ - 28, align: 'center' });
+    doc.text(addr || '—', M + LOGO_SZ + 18, y + (board ? 33 : 23), { width: CW - LOGO_SZ - 28, align: 'center' });
     if (contact) {
-        doc.text(`📞 ${contact}`, M + LOGO_SZ + 18, y + (board ? 45 : 35), { width: CW - LOGO_SZ - 28, align: 'center' });
+        doc.text(contact, M + LOGO_SZ + 18, y + (board ? 45 : 35), { width: CW - LOGO_SZ - 28, align: 'center' });
     }
 
     y += LOGO_SZ + 8;
@@ -117,7 +118,6 @@ async function drawCard(
         ['Mobile', student.phone || '—'],
         ['Class / Section', `${student.class || '—'} / ${student.section || '—'}`],
         ['ID No', student.admissionNumber || '—'],
-        ['Roll No', String(student.rollNumber ?? '—')],
     ];
 
     y += 6;
@@ -177,15 +177,27 @@ async function drawCard(
 
     // ── SIGNATURE SECTION ─────────────────────────────────────────────────────
     y += 8;
-    const sigCols = ['Class Teacher', 'Principal', 'Director'];
-    const sigColW = CW / 3;
+    // Exactly two signature places: Class Teacher (left) and Principal (right).
+    const sigColW = CW / 2;
+    const leftX = M;
+    const rightX = M + sigColW;
 
-    sigCols.forEach((label, i) => {
-        const sx = M + i * sigColW;
-        doc.lineWidth(0.7).strokeColor('#555').moveTo(sx + 10, y + 26).lineTo(sx + sigColW - 10, y + 26).stroke();
-        doc.font('Helvetica').fontSize(7.5).fillColor('#555555');
-        doc.text(label, sx, y + 30, { width: sigColW, align: 'center' });
-    });
+    // Left: Class Teacher (manual sign)
+    doc.lineWidth(0.7).strokeColor('#555').moveTo(leftX + 10, y + 26).lineTo(leftX + sigColW - 10, y + 26).stroke();
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555');
+    doc.text('Class Teacher', leftX, y + 30, { width: sigColW, align: 'center' });
+
+    // Right: Principal (auto signature image if configured)
+    if (principalSigBuf) {
+        try {
+            doc.image(principalSigBuf, rightX + (sigColW - 70) / 2, y + 2, { width: 70, height: 20 });
+        } catch {
+            // Keep fallback as line + label if image rendering fails.
+        }
+    }
+    doc.lineWidth(0.7).strokeColor('#555').moveTo(rightX + 10, y + 26).lineTo(rightX + sigColW - 10, y + 26).stroke();
+    doc.font('Helvetica').fontSize(7.5).fillColor('#555555');
+    doc.text('Principal', rightX, y + 30, { width: sigColW, align: 'center' });
 }
 
 export async function generateAdmitCardPDF(opts: AdmitCardPDFOptions): Promise<Buffer> {
@@ -195,26 +207,14 @@ export async function generateAdmitCardPDF(opts: AdmitCardPDFOptions): Promise<B
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
 
-    const [logoBuf, photoBuf] = await Promise.all([
+    const [logoBuf, photoBuf, principalSigBuf] = await Promise.all([
         fetchImageBuffer(school.logo),
         fetchImageBuffer(student.photo),
+        fetchImageBuffer((school as any).principalSignature),
     ]);
 
-    // Draw card 1 (top half)
-    await drawCard(doc, logoBuf, photoBuf, opts, 10);
-
-    // Dashed cut line between cards
-    const cutY = 10 + CARD_H + 4;
-    doc.lineWidth(0.8).strokeColor('#9e9e9e')
-        .dash(6, { space: 4 })
-        .moveTo(M, cutY)
-        .lineTo(M + CW, cutY)
-        .stroke();
-    doc.undash();
-    doc.fontSize(7).fillColor('#9e9e9e').text('✂ Cut here', M, cutY + 1, { width: CW, align: 'center' });
-
-    // Draw card 2 (bottom half — duplicate for printing)
-    await drawCard(doc, logoBuf, photoBuf, opts, cutY + 10);
+    // Draw a single admit card per page
+    await drawCard(doc, logoBuf, photoBuf, principalSigBuf, opts, 10);
 
     doc.end();
     return new Promise<Buffer>((resolve, reject) => {

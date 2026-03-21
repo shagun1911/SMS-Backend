@@ -82,12 +82,28 @@ class FeeService {
         // spread evenly across all session months.
         const concession = Number((student as any).concessionAmount) || 0;
         const sessionMonthCount = months.length || 12;
-        const adjustedMonthlyPerMonth = concession > 0 && monthlyTotal > 0
-            ? Math.max(0, Math.round(((monthlyTotal * sessionMonthCount) - concession) / sessionMonthCount))
-            : monthlyTotal;
+
+        // Important: don't use Math.round per-month here, because it can slightly change the
+        // effective annual concession (e.g., 6000 turning into 5997) due to rounding drift.
+        // Instead, distribute the remaining rupees across months so the TOTAL matches exactly.
+        // Example: if annualMonthlyAfter = 5997 and months = 12 -> 9 months get +1.
+        const annualMonthlyAfter = concession > 0 && monthlyTotal > 0
+            ? Math.max(0, (monthlyTotal * sessionMonthCount) - concession)
+            : (monthlyTotal * sessionMonthCount);
+
+        const annualMonthlyAfterInt = Math.round(annualMonthlyAfter);
+        const basePerMonth = sessionMonthCount > 0
+            ? Math.floor(annualMonthlyAfterInt / sessionMonthCount)
+            : annualMonthlyAfterInt;
+        const remainder = sessionMonthCount > 0
+            ? annualMonthlyAfterInt - (basePerMonth * sessionMonthCount)
+            : 0;
 
         // Monthly ledger entries
+        let idx = 0;
         for (const m of months) {
+            const adjustedMonthlyPerMonth = idx < remainder ? basePerMonth + 1 : basePerMonth;
+            idx++;
             const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
             if (existing) continue;
             await StudentFeeRepository.create({
@@ -335,6 +351,22 @@ class FeeService {
             }
         }
 
+        // Resolve which academic month this receipt was applied to by checking
+        // the StudentFee ledger entries that contain this receiptNumber.
+        // For a receipt spanning multiple months, we take the latest month (max dueDate).
+        let feeMonth: string | undefined = undefined;
+        try {
+            const feeDoc = await StudentFee.findOne({
+                schoolId: new Types.ObjectId(schoolId),
+                studentId: payment.studentId,
+                sessionId: session._id,
+                'payments.receiptNumber': payment.receiptNumber,
+            }).sort({ dueDate: -1 }).lean();
+            feeMonth = feeDoc?.month ? String(feeDoc.month) : undefined;
+        } catch (_) {
+            // If anything fails, we fall back to the generic session month label.
+        }
+
         const pdfBuffer = await generateReceiptPDF({
             school,
             payment,
@@ -345,6 +377,7 @@ class FeeService {
             remainingDue,
             sessionYear: session.sessionYear,
             feeComponents,
+            feeMonth,
         });
 
         const receiptsDir = path.join(process.cwd(), 'receipts');
@@ -487,6 +520,23 @@ class FeeService {
             }
         }
 
+        // Determine academic month for this receipt by checking which StudentFee
+        // ledger rows contain this receiptNumber. Pick the latest dueDate month.
+        let feeMonth: string | undefined = undefined;
+        try {
+            if (session) {
+                const feeDoc = await StudentFee.findOne({
+                    schoolId: new Types.ObjectId(schoolId),
+                    studentId: payment.studentId,
+                    sessionId: session._id,
+                    'payments.receiptNumber': payment.receiptNumber,
+                }).sort({ dueDate: -1 }).lean();
+                feeMonth = feeDoc?.month ? String(feeDoc.month) : undefined;
+            }
+        } catch (_) {
+            // fallback to session label
+        }
+
         return await generateReceiptPDF({
             school,
             payment,
@@ -497,11 +547,14 @@ class FeeService {
             remainingDue: payment.remainingDue,
             sessionYear: session?.sessionYear,
             feeComponents,
+            feeMonth,
         });
     }
 
-    async listFeePayments(schoolId: string, limit = 200): Promise<IFeePayment[]> {
-        const payments = await FeePaymentRepository.findPaymentsBySchool(schoolId, limit);
+    async listFeePayments(schoolId: string, limit = 200, studentId?: string): Promise<IFeePayment[]> {
+        const payments = studentId
+            ? await FeePaymentRepository.findByStudent(schoolId, studentId)
+            : await FeePaymentRepository.findPaymentsBySchool(schoolId, limit);
 
         // Hide payments for students that have been deleted (studentId failed to populate),
         // so receipts list does not show \"Unknown\" rows.
@@ -601,99 +654,71 @@ class FeeService {
      * Pending current month = paid up to previous months, but not fully paid up to current month.
      */
     async getPendingCurrentMonthStudents(schoolId: string): Promise<any[]> {
-        const schoolObjId = new Types.ObjectId(schoolId);
         const today = new Date();
-        const currentYear = today.getFullYear();
-        const currentMonthIndex = today.getMonth(); // 0-based
 
         const session = await SessionRepository.findActive(schoolId);
-        const structures = session ? await FeeStructureRepository.findBySession(schoolId, session._id.toString()) : [];
-        const classFeeParts = new Map<string, { monthlyTotal: number; oneTimeTotal: number }>();
-        for (const s of structures as any[]) {
-            const rawItems: Array<{ amount: number; type?: string }> =
-                (s.components && s.components.length > 0)
-                    ? s.components
-                    : (s.fees || []).map((f: any) => ({ amount: f.amount, type: f.type }));
-            let monthlyTotal = 0;
-            let oneTimeTotal = 0;
-            for (const item of rawItems) {
-                if (!item || typeof item.amount !== 'number') continue;
-                const t = (item.type || '').toString().toLowerCase();
-                if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
-                else if (t === 'monthly') monthlyTotal += item.amount;
-            }
-            if (s.class) classFeeParts.set(String(s.class), { monthlyTotal, oneTimeTotal });
-        }
-        const getPartsForClass = (cls?: string) => {
-            if (!cls) return null;
-            const direct = classFeeParts.get(cls);
-            if (direct) return direct;
-            if (typeof cls === 'string' && cls.includes(' ')) {
-                const first = classFeeParts.get(cls.split(' ')[0]);
-                if (first) return first;
-            }
-            return null;
-        };
-        const expectedFromParts = (parts: { monthlyTotal: number; oneTimeTotal: number } | null, totalYearly: number, monthsCount: number) => {
-            if (monthsCount <= 0) return 0;
-            if (parts && (parts.monthlyTotal > 0 || parts.oneTimeTotal > 0)) {
-                return Math.round(parts.oneTimeTotal + parts.monthlyTotal * monthsCount);
-            }
-            return Math.round((totalYearly / 12) * monthsCount);
-        };
+        if (!session) return [];
+
+        // Map today's date into the active session's month list.
+        const sessionMonths = this.getSessionYearMonths(session);
+        const todayYear = today.getFullYear();
+        const todayMonth = today.getMonth() + 1; // 1-based
+        const currentSessionMonth = sessionMonths.find((m) => m.year === todayYear && m.month === todayMonth);
+        if (!currentSessionMonth) return [];
+
+        const currentMonthName = currentSessionMonth.monthName;
+        const sessionId = session._id.toString();
+
+        // IMPORTANT:
+        // Always use the ledger's `totalAmount/paidAmount/remainingAmount` for the current month.
+        // This guarantees "Pending (Current month)" is perfectly synced with your Fee Structure
+        // and any student-level concession adjustments already baked into the ledger.
+        const feeRecords = await StudentFeeRepository.findByMonth(schoolId, sessionId, currentMonthName);
+
+        const pending = feeRecords
+            .filter((f: any) => (f.status || '').toString() !== FeeStatus.PAID && (f.remainingAmount ?? 0) > 0)
+            .sort((a: any, b: any) => {
+                // Keep stable ordering; class/section sorting will be handled after student fetch.
+                return String(a.studentId).localeCompare(String(b.studentId));
+            });
+
+        const studentIds = Array.from(new Set(pending.map((f: any) => String(f.studentId))));
+        if (studentIds.length === 0) return [];
 
         const students = await Student.find({
-            schoolId: schoolObjId,
+            schoolId: new Types.ObjectId(schoolId),
             isActive: true,
-            totalYearlyFee: { $gt: 0 },
-        })
-            .sort({ class: 1, section: 1 })
-            .lean();
+            _id: { $in: studentIds }
+        }).lean();
 
-        const pending: any[] = [];
+        const studentMap = new Map<string, any>(students.map((s: any) => [String(s._id), s]));
 
-        for (const s of students as any[]) {
-            const totalYearly: number = s.totalYearlyFee ?? 0;
-            const paidAmount: number = s.paidAmount ?? 0;
-            const admissionDate: Date | null = s.admissionDate ? new Date(s.admissionDate) : null;
+        return pending
+            .map((f: any) => {
+                const s = studentMap.get(String(f.studentId));
+                if (!s) return null;
 
-            const startYear = admissionDate ? admissionDate.getFullYear() : currentYear;
-            const startMonthIndex = admissionDate ? admissionDate.getMonth() : 0;
+                // Don't mark fees pending for months that happened before the student's admission.
+                const admissionDate = s.admissionDate ? new Date(s.admissionDate) : null;
+                const feeDueDate = f.dueDate ? new Date(f.dueDate) : null;
+                if (admissionDate && feeDueDate && feeDueDate < admissionDate) return null;
 
-            let monthDiff =
-                (currentYear - startYear) * 12 +
-                (currentMonthIndex - startMonthIndex) +
-                1;
-
-            if (monthDiff <= 0) continue;
-            if (monthDiff > 12) monthDiff = 12;
-
-            const parts = getPartsForClass(s.class);
-            const expectedTillPrev = Math.min(totalYearly, expectedFromParts(parts, totalYearly, Math.max(0, monthDiff - 1)));
-            const expectedTillNow = Math.min(totalYearly, expectedFromParts(parts, totalYearly, monthDiff));
-
-            // Only current month pending (no previous month backlog)
-            const okTillPrev = paidAmount + 0.5 >= expectedTillPrev;
-            const missingCurrent = paidAmount + 0.5 < expectedTillNow;
-            if (okTillPrev && missingCurrent) {
-                const currentMonthTotal = Math.max(0, Math.round(expectedTillNow - expectedTillPrev));
-                const currentMonthPaid = Math.min(
-                    currentMonthTotal,
-                    Math.max(0, Math.round(paidAmount - expectedTillPrev))
-                );
-                const currentMonthDue = Math.max(0, currentMonthTotal - currentMonthPaid);
-                pending.push({
+                return {
                     ...s,
-                    expectedTillNow,
-                    shortfallTillNow: expectedTillNow - paidAmount,
-                    currentMonthTotal,
-                    currentMonthPaid,
-                    currentMonthDue,
-                });
-            }
-        }
-
-        return pending;
+                    currentMonthTotal: f.totalAmount ?? 0,
+                    currentMonthPaid: f.paidAmount ?? 0,
+                    currentMonthDue: f.remainingAmount ?? 0,
+                };
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => {
+                const ca = (a.class || '').toString();
+                const cb = (b.class || '').toString();
+                // Sort class/section roughly in numeric order when possible.
+                const classCmp = ca.localeCompare(cb, undefined, { numeric: true, sensitivity: 'base' });
+                if (classCmp !== 0) return classCmp;
+                return (a.section || '').toString().localeCompare((b.section || '').toString(), undefined, { sensitivity: 'base' });
+            });
     }
 
     /**
@@ -887,6 +912,20 @@ class FeeService {
 
         const school = await SchoolRepository.findById(schoolId);
         if (school) {
+            // Resolve receipt month from StudentFee ledger rows for this receiptNumber.
+            let feeMonth: string | undefined = undefined;
+            try {
+                const feeDoc = await StudentFee.findOne({
+                    schoolId: new Types.ObjectId(schoolId),
+                    studentId: payment.studentId,
+                    sessionId: session._id,
+                    'payments.receiptNumber': payment.receiptNumber,
+                }).sort({ dueDate: -1 }).lean();
+                feeMonth = feeDoc?.month ? String(feeDoc.month) : undefined;
+            } catch (_) {
+                // ignore and fallback
+            }
+
             const pdfBuffer = await generateReceiptPDF({
                 school,
                 payment,
@@ -895,6 +934,8 @@ class FeeService {
                 previousPaid: 0,
                 thisPayment: initialAmount,
                 remainingDue,
+                sessionYear: session.sessionYear,
+                feeMonth,
             });
             const receiptsDir = path.join(process.cwd(), 'receipts');
             if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
@@ -1092,6 +1133,12 @@ class FeeService {
             throw new ErrorResponse(`Invalid month: ${targetMonthName}`, 400);
         }
 
+        // Create receipt metadata early so it can be stored inside StudentFee ledger
+        // allocations (this is required for receipt PDF month resolution).
+        const yearPrefix = session.sessionYear ? session.sessionYear.split('-')[0] : String(new Date().getFullYear());
+        const receiptNumber = await FeePaymentRepository.getNextReceiptNumber(schoolId, yearPrefix);
+        const paymentDate = new Date();
+
         // Ensure ledger exists so we have one row per month.
         const student = await StudentRepository.findById(payload.studentId);
         if (student) {
@@ -1127,6 +1174,8 @@ class FeeService {
                 staffId: payload.staffId,
                 transactionId: payload.transactionId,
                 remarks: payload.remarks,
+                receiptNumber,
+                paymentDate,
             });
             remaining -= amtForMonth;
         }
@@ -1142,10 +1191,6 @@ class FeeService {
 
         // Create a FeePayment record so the receipt appears in the month
         // when the cash was actually received (based on paymentDate).
-        const yearPrefix = session.sessionYear ? session.sessionYear.split('-')[0] : String(new Date().getFullYear());
-        const receiptNumber = await FeePaymentRepository.getNextReceiptNumber(schoolId, yearPrefix);
-        const paymentDate = new Date();
-
         await FeePaymentRepository.create({
             schoolId: new Types.ObjectId(schoolId) as any,
             studentId: new Types.ObjectId(payload.studentId) as any,

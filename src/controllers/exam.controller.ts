@@ -63,6 +63,7 @@ class ExamController {
             if (!exam) {
                 return next(new ErrorResponse('Exam not found', 404));
             }
+            await ExamResult.deleteMany({ examId: req.params.id, schoolId: req.schoolId });
             await Exam.findByIdAndDelete(req.params.id);
             return sendResponse(res, {}, 'Exam deleted', 200);
         } catch (error) {

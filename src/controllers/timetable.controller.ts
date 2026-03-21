@@ -10,6 +10,12 @@ import Session from '../models/session.model';
 import { sendResponse } from '../utils/response';
 import ErrorResponse from '../utils/errorResponse';
 import { generateTimetablePDF, generateSchoolTimetablePDF } from '../services/pdfTimetable.service';
+import {
+    normalizeTimetableBreaks,
+    timetableColumnCount,
+    buildScheduleColumnDtos,
+    TimetableBreakInput,
+} from '../utils/timetableSchedule';
 
 function getTeacherConflicts(
     schoolId: string,
@@ -61,21 +67,68 @@ class TimetableController {
 
     async upsertSettings(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const { periodCount, lunchAfterPeriod, firstPeriodStart, periodDurationMinutes, lunchBreakDuration, subjects, sessionId } = req.body;
+            const {
+                periodCount,
+                lunchAfterPeriod,
+                firstPeriodStart,
+                periodDurationMinutes,
+                lunchBreakDuration,
+                breakLabel,
+                breaks: breaksBody,
+                subjects,
+                sessionId,
+            } = req.body;
             const filter: any = { schoolId: req.schoolId };
             if (sessionId) filter.sessionId = sessionId;
             let settings = await TimetableSettings.findOne(filter);
-            const payload = {
+
+            let breaksPayload: TimetableBreakInput[] | undefined;
+            if (Array.isArray(breaksBody)) {
+                if (breaksBody.length === 0) {
+                    breaksPayload = [];
+                } else {
+                    breaksPayload = breaksBody.map((b: any) => ({
+                        afterPeriod: Math.max(0, Math.min(12, Number(b.afterPeriod) || 0)),
+                        label: String(b.label || 'Break').trim().slice(0, 40) || 'Break',
+                        durationMinutes: Math.max(5, Math.min(120, Number(b.durationMinutes) || 15)),
+                    }));
+                }
+            }
+
+            const pc = periodCount ?? 7;
+            const lap = lunchAfterPeriod ?? 4;
+            const fps = firstPeriodStart || '08:00';
+            const pdm = periodDurationMinutes ?? 40;
+            const lbd = lunchBreakDuration ?? 40;
+            const bl = (breakLabel || 'Lunch Break').toString().trim();
+
+            const payload: any = {
                 schoolId: req.schoolId,
                 sessionId: sessionId || undefined,
-                periodCount: periodCount ?? 7,
-                lunchAfterPeriod: lunchAfterPeriod ?? 4,
-                firstPeriodStart: firstPeriodStart || '08:00',
-                periodDurationMinutes: periodDurationMinutes ?? 40,
-                lunchBreakDuration: lunchBreakDuration ?? 40,
+                periodCount: pc,
+                lunchAfterPeriod: lap,
+                firstPeriodStart: fps,
+                periodDurationMinutes: pdm,
+                lunchBreakDuration: lbd,
+                breakLabel: bl,
                 subjects: Array.isArray(subjects) ? subjects : [],
                 isActive: true,
             };
+
+            if (breaksPayload !== undefined) {
+                payload.breaks = breaksPayload;
+                const first = breaksPayload[0];
+                if (first) {
+                    payload.lunchAfterPeriod = first.afterPeriod;
+                    payload.lunchBreakDuration = first.durationMinutes;
+                    payload.breakLabel = first.label;
+                } else {
+                    payload.lunchAfterPeriod = 0;
+                    payload.lunchBreakDuration = 40;
+                    payload.breakLabel = '—';
+                }
+            }
+
             if (settings) {
                 settings = await TimetableSettings.findByIdAndUpdate(settings._id, payload, { new: true });
             } else {
@@ -96,7 +149,11 @@ class TimetableController {
             const classes = await Class.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1, section: 1 }).lean();
             const rows = (grid as any)?.rows || [];
             const periodCount = settings?.periodCount ?? 7;
-            const totalCols = periodCount + 1;
+            const firstPeriodStart = settings?.firstPeriodStart || '08:00';
+            const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
+            const normBreaks = normalizeTimetableBreaks(settings || {});
+            const totalCols = timetableColumnCount(periodCount, firstPeriodStart, periodDurationMinutes, normBreaks);
+            const scheduleColumns = buildScheduleColumnDtos(settings as any);
             const rowsWithCells = (classes as any[]).map((cls) => {
                 const existing = rows.find((r: any) => r.className === cls.className && (r.section || 'A') === (cls.section || 'A'));
                 const cells = existing?.cells?.length ? existing.cells : Array.from({ length: totalCols }, () => ({}));
@@ -114,7 +171,18 @@ class TimetableController {
                     }),
                 };
             });
-            return sendResponse(res, { settings, rows: rowsWithCells, classNames: (classes as any[]).map((c) => `${c.className}-${c.section || 'A'}`) }, 'Timetable grid retrieved', 200);
+            return sendResponse(
+                res,
+                {
+                    settings,
+                    scheduleColumns,
+                    totalCols,
+                    rows: rowsWithCells,
+                    classNames: (classes as any[]).map((c) => `${c.className}-${c.section || 'A'}`),
+                },
+                'Timetable grid retrieved',
+                200
+            );
         } catch (error) {
             return next(error);
         }
@@ -126,7 +194,10 @@ class TimetableController {
             if (!Array.isArray(rows)) return next(new ErrorResponse('rows array required', 400));
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true });
             const periodCount = settings?.periodCount ?? 7;
-            const totalCols = periodCount + 1;
+            const firstPeriodStart = settings?.firstPeriodStart || '08:00';
+            const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
+            const normBreaks = normalizeTimetableBreaks(settings?.toObject?.() ?? settings ?? {});
+            const totalCols = timetableColumnCount(periodCount, firstPeriodStart, periodDurationMinutes, normBreaks);
             const gridRows = rows.map((r: any) => ({
                 className: r.className,
                 section: r.section || undefined,
@@ -156,11 +227,14 @@ class TimetableController {
             const session = await Session.findOne({ schoolId: req.schoolId, isActive: true });
             const sessionYear = session ? (session as any).sessionYear?.replace('-', '–') : '2025–26';
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true });
-            const periodCount = settings?.periodCount ?? 7;
-            const lunchAfterPeriod = settings?.lunchAfterPeriod ?? 4;
-            const firstPeriodStart = settings?.firstPeriodStart || '08:00';
-            const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
-            const lunchBreakDuration = settings?.lunchBreakDuration ?? 40;
+            const settingsObj = settings ? settings.toObject() : null;
+            const periodCount = settingsObj?.periodCount ?? 7;
+            const lunchAfterPeriod = settingsObj?.lunchAfterPeriod ?? 4;
+            const firstPeriodStart = settingsObj?.firstPeriodStart || '08:00';
+            const periodDurationMinutes = settingsObj?.periodDurationMinutes ?? 40;
+            const lunchBreakDuration = settingsObj?.lunchBreakDuration ?? 40;
+            const breakLabel = settingsObj?.breakLabel || 'Lunch Break';
+            const breaks = normalizeTimetableBreaks(settingsObj || {});
             const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
                 .populate('rows.cells.teacherId', 'name')
                 .lean();
@@ -179,6 +253,8 @@ class TimetableController {
                 firstPeriodStart,
                 periodDurationMinutes,
                 lunchBreakDuration,
+                breakLabel,
+                breaks,
                 rows,
             });
             res.setHeader('Content-Type', 'application/pdf');
@@ -366,10 +442,14 @@ class TimetableController {
             const session = await Session.findOne({ schoolId: req.schoolId, isActive: true });
             if (session) sessionYear = (session as any).sessionYear?.replace('-', '–') || '';
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true });
-            const periodCount = settings?.periodCount ?? 7;
-            const lunchAfterPeriod = settings?.lunchAfterPeriod ?? 4;
-            const firstPeriodStart = settings?.firstPeriodStart || '08:00';
-            const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
+            const settingsObj = settings ? settings.toObject() : null;
+            const periodCount = settingsObj?.periodCount ?? 7;
+            const lunchAfterPeriod = settingsObj?.lunchAfterPeriod ?? 4;
+            const firstPeriodStart = settingsObj?.firstPeriodStart || '08:00';
+            const periodDurationMinutes = settingsObj?.periodDurationMinutes ?? 40;
+            const lunchBreakDuration = settingsObj?.lunchBreakDuration ?? 40;
+            const breakLabel = settingsObj?.breakLabel || 'Lunch Break';
+            const breaks = normalizeTimetableBreaks(settingsObj || {});
             const days = (timetables as any[]).map((t) => ({
                 dayOfWeek: t.dayOfWeek,
                 slots: (t.slots || []).map((s: any) => ({
@@ -393,6 +473,9 @@ class TimetableController {
                 lunchAfterPeriod,
                 firstPeriodStart,
                 periodDurationMinutes,
+                lunchBreakDuration,
+                breakLabel,
+                breaks,
                 days,
             });
             res.setHeader('Content-Type', 'application/pdf');

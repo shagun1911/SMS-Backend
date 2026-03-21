@@ -2,6 +2,7 @@
 import PDFDocument from 'pdfkit';
 import { ISchool } from '../types';
 import { fetchImageBuffer } from '../utils/fetchImage';
+import { buildTimetableColumns, normalizeTimetableBreaks, TimetableBreakInput } from '../utils/timetableSchedule';
 
 const MARGIN = 28;
 const PAGE_WIDTH = 842;  // A4 landscape
@@ -10,11 +11,6 @@ const LOGO_SIZE = 36;
 const HEADER_TOP = 20;
 
 const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-
-function parseTime(s: string): number {
-    const [h, m] = (s || '08:00').split(':').map(Number);
-    return (h || 0) * 60 + (m || 0);
-}
 
 function formatTime(s: string): string {
     if (!s) return '–';
@@ -33,6 +29,10 @@ export interface TimetablePDFOptions {
     lunchAfterPeriod: number;
     firstPeriodStart: string;
     periodDurationMinutes: number;
+    lunchBreakDuration: number;
+    breakLabel?: string;
+    /** When set, drives all break columns (else derived from lunch* + breakLabel) */
+    breaks?: TimetableBreakInput[];
     days: { dayOfWeek: number; slots: { startTime: string; endTime: string; subject?: string; teacherName?: string; type: string; title?: string }[] }[];
 }
 
@@ -47,8 +47,40 @@ export async function generateTimetablePDF(options: TimetablePDFOptions): Promis
         lunchAfterPeriod,
         firstPeriodStart,
         periodDurationMinutes,
+        lunchBreakDuration,
+        breakLabel = 'Lunch Break',
+        breaks: breaksOpt,
         days,
     } = options;
+
+    const breaksResolved =
+        breaksOpt !== undefined
+            ? breaksOpt
+            : normalizeTimetableBreaks({
+                  lunchAfterPeriod,
+                  lunchBreakDuration,
+                  breakLabel,
+              });
+    const columnDefs = buildTimetableColumns(
+        periodCount,
+        firstPeriodStart,
+        periodDurationMinutes,
+        breaksResolved
+    ).map((c) =>
+        c.kind === 'break'
+            ? {
+                  label: c.label.trim().toUpperCase(),
+                  time: `${c.durationMinutes} min`,
+                  isBreak: true as const,
+                  breakDisplay: c.label.trim().toUpperCase(),
+              }
+            : {
+                  label: c.label,
+                  time: `${formatTime(c.startTime)} – ${formatTime(c.endTime)}`,
+                  isBreak: false as const,
+                  startTime: c.startTime,
+              }
+    );
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: MARGIN, bufferPages: true });
     const chunks: Buffer[] = [];
@@ -98,25 +130,8 @@ export async function generateTimetablePDF(options: TimetablePDFOptions): Promis
     doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
     y += 14;
 
-    // Build period structure: P1..lunchAfterPeriod, LUNCH, P(lunchAfterPeriod+1)..periodCount; and start time per column
-    const periodLabels: { label: string; time: string; isLunch: boolean; startTime?: string }[] = [];
-    let mins = parseTime(firstPeriodStart);
-    const lunchDuration = periodDurationMinutes;
-    for (let i = 1; i <= periodCount; i++) {
-        if (i === lunchAfterPeriod + 1) {
-            periodLabels.push({ label: 'LUNCH', time: 'Break', isLunch: true });
-            mins += lunchDuration;
-        }
-        const start = `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
-        mins += periodDurationMinutes;
-        const end = `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
-        periodLabels.push({ label: `P${i}`, time: `${formatTime(start)} – ${formatTime(end)}`, isLunch: false, startTime: start });
-    }
-    if (lunchAfterPeriod === 0) {
-        periodLabels.unshift({ label: 'LUNCH', time: 'Break', isLunch: true });
-    }
-
-    const cellW = (CONTENT_WIDTH - 52) / periodLabels.length;
+    const periodLabels = columnDefs;
+    const cellW = (CONTENT_WIDTH - 52) / Math.max(1, periodLabels.length);
     const dayColW = 50;
     const cellH = 22;
     const headerH = 32;
@@ -130,8 +145,8 @@ export async function generateTimetablePDF(options: TimetablePDFOptions): Promis
 
     let x = MARGIN + dayColW;
     periodLabels.forEach((p) => {
-        doc.rect(x, tableTop, cellW, headerH).fillAndStroke(p.isLunch ? '#fef3c7' : '#f3f4f6', '#e5e7eb');
-        doc.fillColor(p.isLunch ? '#92400e' : '#000000');
+        doc.rect(x, tableTop, cellW, headerH).fillAndStroke(p.isBreak ? '#fef3c7' : '#f3f4f6', '#e5e7eb');
+        doc.fillColor(p.isBreak ? '#92400e' : '#000000');
         doc.font('Helvetica-Bold').fontSize(8);
         doc.text(p.label, x + 4, tableTop + 4, { width: cellW - 8, align: 'center' });
         doc.font('Helvetica').fontSize(7);
@@ -159,10 +174,10 @@ export async function generateTimetablePDF(options: TimetablePDFOptions): Promis
         x = MARGIN + dayColW;
 
         periodLabels.forEach((p) => {
-            if (p.isLunch) {
+            if (p.isBreak) {
                 doc.rect(x, y, cellW, cellH).fillAndStroke('#fef3c7', '#e5e7eb');
                 doc.font('Helvetica').fontSize(8).fillColor('#92400e');
-                doc.text('LUNCH', x + 4, y + 8, { width: cellW - 8, align: 'center' });
+                doc.text(p.breakDisplay, x + 4, y + 8, { width: cellW - 8, align: 'center' });
                 doc.fillColor('#000000');
             } else {
                 const start = p.startTime || '';
@@ -222,6 +237,8 @@ export interface SchoolTimetablePDFOptions {
     firstPeriodStart: string;
     periodDurationMinutes: number;
     lunchBreakDuration: number;
+    breakLabel?: string;
+    breaks?: TimetableBreakInput[];
     rows: { className: string; cells: { subject?: string; teacherName?: string }[] }[];
 }
 
@@ -234,8 +251,38 @@ export async function generateSchoolTimetablePDF(options: SchoolTimetablePDFOpti
         firstPeriodStart,
         periodDurationMinutes,
         lunchBreakDuration,
+        breakLabel = 'Lunch Break',
+        breaks: breaksOpt,
         rows = [],
     } = options;
+
+    const breaksResolved =
+        breaksOpt !== undefined
+            ? breaksOpt
+            : normalizeTimetableBreaks({
+                  lunchAfterPeriod,
+                  lunchBreakDuration,
+                  breakLabel,
+              });
+    const schoolColumnDefs = buildTimetableColumns(
+        periodCount,
+        firstPeriodStart,
+        periodDurationMinutes,
+        breaksResolved
+    ).map((c) =>
+        c.kind === 'break'
+            ? {
+                  label: c.label.trim().toUpperCase(),
+                  time: `${c.durationMinutes} min`,
+                  isBreak: true as const,
+                  breakDisplay: c.label.trim().toUpperCase(),
+              }
+            : {
+                  label: c.label,
+                  time: `${formatTime(c.startTime)} – ${formatTime(c.endTime)}`,
+                  isBreak: false as const,
+              }
+    );
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: MARGIN, bufferPages: true });
     const chunks: Buffer[] = [];
@@ -282,24 +329,9 @@ export async function generateSchoolTimetablePDF(options: SchoolTimetablePDFOpti
     doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
     y += 14;
 
-    const periodLabels: { label: string; time: string; isLunch: boolean }[] = [];
-    let mins = parseTime(firstPeriodStart);
-    for (let i = 1; i <= periodCount; i++) {
-        if (i === lunchAfterPeriod + 1) {
-            periodLabels.push({ label: 'LUNCH', time: 'Break', isLunch: true });
-            mins += lunchBreakDuration;
-        }
-        const start = `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
-        mins += periodDurationMinutes;
-        const end = `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
-        periodLabels.push({ label: `P${i}`, time: `${formatTime(start)} – ${formatTime(end)}`, isLunch: false });
-    }
-    if (lunchAfterPeriod === 0) {
-        periodLabels.unshift({ label: 'LUNCH', time: 'Break', isLunch: true });
-    }
-
+    const periodLabels = schoolColumnDefs;
     const classColW = 56;
-    const periodColW = (CONTENT_WIDTH - classColW) / periodLabels.length;
+    const periodColW = (CONTENT_WIDTH - classColW) / Math.max(1, periodLabels.length);
     const cellH = 20;
     const headerH = 28;
 
@@ -311,8 +343,8 @@ export async function generateSchoolTimetablePDF(options: SchoolTimetablePDFOpti
 
     let x = MARGIN + classColW;
     periodLabels.forEach((p) => {
-        doc.rect(x, tableTop, periodColW, headerH).fillAndStroke(p.isLunch ? '#fef3c7' : '#f3f4f6', '#e5e7eb');
-        doc.fillColor(p.isLunch ? '#92400e' : '#000000');
+        doc.rect(x, tableTop, periodColW, headerH).fillAndStroke(p.isBreak ? '#fef3c7' : '#f3f4f6', '#e5e7eb');
+        doc.fillColor(p.isBreak ? '#92400e' : '#000000');
         doc.font('Helvetica-Bold').fontSize(7);
         doc.text(p.label, x + 2, tableTop + 2, { width: periodColW - 4, align: 'center' });
         doc.font('Helvetica').fontSize(6);
@@ -327,13 +359,12 @@ export async function generateSchoolTimetablePDF(options: SchoolTimetablePDFOpti
         doc.font('Helvetica-Bold').fontSize(8);
         doc.text(row.className, MARGIN + 4, y + 5, { width: classColW - 8 });
         x = MARGIN + classColW;
-        periodLabels.forEach((_p, idx) => {
+        periodLabels.forEach((colDef, idx) => {
             const cell = row.cells[idx];
-            const isLunch = periodLabels[idx].isLunch;
-            if (isLunch) {
+            if (colDef.isBreak) {
                 doc.rect(x, y, periodColW, cellH).fillAndStroke('#fef3c7', '#e5e7eb');
                 doc.font('Helvetica').fontSize(7).fillColor('#92400e');
-                doc.text('LUNCH', x + 2, y + 6, { width: periodColW - 4, align: 'center' });
+                doc.text(colDef.breakDisplay, x + 2, y + 6, { width: periodColW - 4, align: 'center' });
                 doc.fillColor('#000000');
             } else {
                 doc.rect(x, y, periodColW, cellH).stroke('#e5e7eb');
