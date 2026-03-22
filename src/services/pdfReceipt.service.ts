@@ -253,7 +253,6 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
     const leftX = M + 8;
     const midX = M + CW / 2;
     const leftW = CW / 2 - 20;
-    const rightW = CW - leftW - 10;
 
     // Row 1: Payment Mode (left) + Total Paid Amount (right)
     doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#4f46e5')
