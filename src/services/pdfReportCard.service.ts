@@ -11,6 +11,8 @@ const CW = PW - 2 * M;
 export interface ReportCardOptions {
     school: ISchool;
     sessionYear?: string;
+    /** Active students in this class & section (for "Rank X out of Y") */
+    classStrength?: number;
     student: {
         firstName?: string;
         lastName?: string;
@@ -26,6 +28,8 @@ export interface ReportCardOptions {
     examResults: {
         examTitle: string;
         examType?: string;
+        /** For ordering the rank progress chart (same as student profile) */
+        examDate?: Date | string;
         subjects: { subject: string; maxMarks: number; obtainedMarks: number }[];
         totalMarks: number;
         totalObtained: number;
@@ -33,6 +37,101 @@ export interface ReportCardOptions {
         grade: string;
         rank?: number;
     }[];
+}
+
+function truncLabel(s: string, max: number): string {
+    if (s.length <= max) return s;
+    return `${s.slice(0, Math.max(1, max - 1))}…`;
+}
+
+/** Line chart: rank (Y, 1 = top) vs exams (X). Static labels replace web hover. */
+function drawRankProgressChart(doc: any, yStart: number, examResults: ReportCardOptions['examResults'], cw: number, m: number): number {
+    const withIndex = examResults
+        .map((e, i) => ({ e, i }))
+        .filter(({ e }) => e.rank != null && Number(e.rank) > 0)
+        .map(({ e, i }) => ({
+            title: e.examTitle || 'Exam',
+            rank: Number(e.rank),
+            t: e.examDate ? new Date(e.examDate as Date).getTime() : NaN,
+            i,
+        }));
+    if (withIndex.length === 0) return yStart;
+
+    const points = [...withIndex].sort((a, b) => {
+        if (Number.isFinite(a.t) && Number.isFinite(b.t) && a.t !== b.t) return a.t - b.t;
+        return a.i - b.i;
+    });
+
+    const titleBlockH = 26;
+    const chartH = 132;
+    const xAxisH = 36;
+    const bottomPad = 6;
+    const chartPadL = 26;
+    const chartPadR = 8;
+    const chartTop = yStart + titleBlockH;
+    const chartLeft = m + chartPadL;
+    const chartW = cw - chartPadL - chartPadR;
+    const chartBottom = chartTop + chartH;
+
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a237e');
+    doc.text('Exam rank progress', m, yStart);
+    doc.fontSize(7).font('Helvetica').fillColor('#666666');
+    doc.text('Student rank in each assessment (lower is better). Labels show exam name and rank.', m, yStart + 13, { width: cw });
+
+    doc.rect(chartLeft, chartTop, chartW, chartH).fill('#fafbff');
+    doc.lineWidth(0.4).strokeColor('#dee2e6').rect(chartLeft, chartTop, chartW, chartH).stroke();
+
+    const ranks = points.map(p => p.rank);
+    const maxR = Math.max(...ranks, 1);
+    const minR = 1;
+
+    const rankToY = (r: number) => {
+        if (maxR <= minR) return (chartTop + chartBottom) / 2;
+        return chartTop + ((r - minR) / (maxR - minR)) * chartH;
+    };
+
+    const n = points.length;
+    const indexToX = (idx: number) => {
+        if (n <= 1) return chartLeft + chartW / 2;
+        return chartLeft + (idx / (n - 1)) * chartW;
+    };
+
+    doc.lineWidth(0.35).strokeColor('#e8ecf4');
+    for (let r = minR; r <= maxR; r++) {
+        const yy = rankToY(r);
+        doc.moveTo(chartLeft, yy).lineTo(chartLeft + chartW, yy).stroke();
+    }
+
+    doc.fontSize(6.5).font('Helvetica').fillColor('#888888');
+    for (let r = minR; r <= maxR; r++) {
+        const yy = rankToY(r);
+        doc.text(String(r), m + 4, yy - 4, { width: chartPadL - 8, align: 'right' });
+    }
+    // Omit a sideways "Rank" label here — it sat on the chart mid-left and overlapped the first
+    // X-axis exam label (e.g. "ct3"). The section title already names this as rank progress.
+
+    doc.lineWidth(1.4).strokeColor('#4f46e5');
+    for (let i = 0; i < n; i++) {
+        const x = indexToX(i);
+        const yy = rankToY(points[i].rank);
+        if (i === 0) doc.moveTo(x, yy);
+        else doc.lineTo(x, yy);
+    }
+    doc.stroke();
+
+    const labelFont = n > 6 ? 5.5 : 6.5;
+    for (let i = 0; i < n; i++) {
+        const x = indexToX(i);
+        const yy = rankToY(points[i].rank);
+        doc.circle(x, yy, 3.2).fillAndStroke('#4f46e5', '#ffffff');
+        doc.fontSize(labelFont).font('Helvetica').fillColor('#334155');
+        const t1 = truncLabel(points[i].title, n > 5 ? 10 : 14);
+        doc.text(t1, x - 34, chartBottom + 4, { width: 68, align: 'center' });
+        doc.font('Helvetica-Bold').fillColor('#4f46e5');
+        doc.text(`Rank ${points[i].rank}`, x - 34, chartBottom + 4 + (labelFont + 1), { width: 68, align: 'center' });
+    }
+
+    return chartBottom + xAxisH + bottomPad;
 }
 
 function fmtDate(d: Date | string | undefined): string {
@@ -58,14 +157,15 @@ function drawRow(doc: any, y: number, cols: { text: string; x: number; w: number
 }
 
 export async function generateReportCardPDF(opts: ReportCardOptions): Promise<Buffer> {
-    const { school, student, examResults, sessionYear } = opts;
+    const { school, student, examResults, sessionYear, classStrength } = opts;
     const doc = new PDFDocument({ size: 'A4', margin: M, bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
 
-    const [logoBuf, photoBuf] = await Promise.all([
+    const [logoBuf, photoBuf, principalSigBuf] = await Promise.all([
         fetchImageBuffer(school.logo),
         fetchImageBuffer(student.photo),
+        fetchImageBuffer((school as ISchool & { principalSignature?: string }).principalSignature),
     ]);
 
     let y = M;
@@ -213,7 +313,13 @@ export async function generateReportCardPDF(opts: ReportCardOptions): Promise<Bu
         doc.rect(M + CW / 2, y, CW / 2, 22).fill('#eff6ff');
         doc.fontSize(8).font('Helvetica-Bold');
         doc.fillColor('#16a34a').text(`Grade: ${exam.grade}`, M + 8, y + 6, { width: CW / 2 - 16 });
-        doc.fillColor('#2563eb').text(exam.rank ? `Rank: ${exam.rank}` : 'Rank: —', M + CW / 2 + 8, y + 6, { width: CW / 2 - 16 });
+        const rankStr =
+            exam.rank != null && exam.rank !== undefined
+                ? classStrength != null && classStrength > 0
+                    ? `Rank: ${exam.rank} out of ${classStrength}`
+                    : `Rank: ${exam.rank}`
+                : 'Rank: —';
+        doc.fillColor('#2563eb').text(rankStr, M + CW / 2 + 8, y + 6, { width: CW / 2 - 16 });
         y += 30;
     }
 
@@ -230,17 +336,40 @@ export async function generateReportCardPDF(opts: ReportCardOptions): Promise<Bu
         y += 36;
     }
 
+    // ── EXAM RANK PROGRESS (same data as student profile graph) ──
+    const hasRankData = examResults.some(e => e.rank != null && Number(e.rank) > 0);
+    if (hasRankData) {
+        const chartBlockMinH = 210;
+        if (y > PH - chartBlockMinH) {
+            doc.addPage();
+            y = M;
+        }
+        y = drawRankProgressChart(doc, y, examResults, CW, M);
+    }
+
     // ── SIGNATURE SECTION ──
     if (y > PH - 80) { doc.addPage(); y = M; }
     y = Math.max(y, PH - 100);
 
-    const sigCols = ['Class Teacher', 'Principal', "Parent/Guardian"];
+    // Order: Class Teacher | Parent/Guardian | Principal (with uploaded principal signature)
+    const sigCols = ['Class Teacher', 'Parent/Guardian', 'Principal'];
     const sigColW = CW / 3;
+    const SIG_IMG_W = Math.min(72, sigColW - 30);
+    const SIG_IMG_H = 24;
+    const lineY = y + 26;
+
     sigCols.forEach((label, i) => {
         const sx = M + i * sigColW;
-        doc.lineWidth(0.7).strokeColor('#555').moveTo(sx + 15, y + 20).lineTo(sx + sigColW - 15, y + 20).stroke();
+        if (i === 2 && principalSigBuf) {
+            try {
+                doc.image(principalSigBuf, sx + (sigColW - SIG_IMG_W) / 2, y + 2, { width: SIG_IMG_W, height: SIG_IMG_H });
+            } catch {
+                /* fall through to line only */
+            }
+        }
+        doc.lineWidth(0.7).strokeColor('#555').moveTo(sx + 15, lineY).lineTo(sx + sigColW - 15, lineY).stroke();
         doc.font('Helvetica').fontSize(7.5).fillColor('#555555');
-        doc.text(label, sx, y + 24, { width: sigColW, align: 'center' });
+        doc.text(label, sx, lineY + 4, { width: sigColW, align: 'center' });
     });
 
     // ── BOTTOM BORDER ──

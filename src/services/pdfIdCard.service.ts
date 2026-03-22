@@ -37,51 +37,79 @@ function fmtDate(d: Date | string | undefined): string {
     return `${String(x.getDate()).padStart(2, '0')} ${months[x.getMonth()]} ${x.getFullYear()}`;
 }
 
+function formatSchoolAddress(school: ISchool): string {
+    const a = school.address;
+    if (!a) return '';
+    return [a.street, a.city, a.state, a.pincode].filter(Boolean).join(', ');
+}
+
 function logoPlaceholder(doc: any, x: number, y: number, sz: number) {
     doc.circle(x + sz / 2, y + sz / 2, sz / 2).fill('#1a237e');
     doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold').text('S', x + sz / 2 - 4, y + sz / 2 - 7, { width: 10 });
     doc.fillColor('#000000');
 }
 
-async function drawFrontCard(doc: any, logoBuf: Buffer | null, photoBuf: Buffer | null, opts: IdCardPDFOptions, cx: number, cy: number) {
+async function drawFrontCard(
+    doc: any,
+    logoBuf: Buffer | null,
+    photoBuf: Buffer | null,
+    principalSigBuf: Buffer | null,
+    opts: IdCardPDFOptions,
+    cx: number,
+    cy: number
+) {
     const { school, student, sessionYear } = opts;
     const x = cx;
     const y = cy;
+
+    // Taller blue header: room for school name, session, and address
+    const HEADER_BLUE_H = 74;
+    const BANNER_H = 16;
+    const headerBottom = y + HEADER_BLUE_H;
 
     // Card background with rounded corners
     doc.roundedRect(x, y, CARD_W, CARD_H, 12).lineWidth(2).strokeColor('#1a237e').stroke();
 
     // Top header band
     doc.save();
-    doc.roundedRect(x, y, CARD_W, 60, 12).clip();
-    doc.rect(x, y, CARD_W, 60).fill('#1a237e');
+    doc.roundedRect(x, y, CARD_W, HEADER_BLUE_H, 12).clip();
+    doc.rect(x, y, CARD_W, HEADER_BLUE_H).fill('#1a237e');
     doc.restore();
 
     // School logo
     const LOGO_SZ = 36;
     const logoX = x + M;
-    const logoY = y + 12;
+    const logoY = y + 10;
     if (logoBuf) {
         try { doc.image(logoBuf, logoX, logoY, { width: LOGO_SZ, height: LOGO_SZ }); }
         catch { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
     } else { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
 
-    // School name + session
+    const textBlockX = x + M + LOGO_SZ + 8;
+    const textBlockW = CARD_W - M * 2 - LOGO_SZ - 8;
+
+    // School name + session + address (below session)
     const schoolName = school.schoolName || 'School Name';
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
-    doc.text(schoolName, x + M + LOGO_SZ + 8, y + 12, { width: CARD_W - M * 2 - LOGO_SZ - 8, align: 'center' });
+    doc.text(schoolName, textBlockX, y + 8, { width: textBlockW, align: 'center' });
 
     if (sessionYear) {
         doc.fontSize(7).font('Helvetica').fillColor('#bbdefb');
-        doc.text(`Session: ${sessionYear}`, x + M + LOGO_SZ + 8, y + 26, { width: CARD_W - M * 2 - LOGO_SZ - 8, align: 'center' });
+        doc.text(`Session: ${sessionYear}`, textBlockX, y + 22, { width: textBlockW, align: 'center' });
     }
 
-    // "IDENTITY CARD" banner
-    doc.rect(x, y + 56, CARD_W, 16).fill('#c62828');
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff');
-    doc.text('STUDENT IDENTITY CARD', x, y + 59, { width: CARD_W, align: 'center' });
+    const addrLine = formatSchoolAddress(school);
+    if (addrLine) {
+        doc.fontSize(5.5).font('Helvetica').fillColor('#e3f2fd');
+        doc.text(addrLine, textBlockX, y + 34, { width: textBlockW, align: 'center', lineGap: 1 });
+    }
 
-    let curY = y + 80;
+    // "IDENTITY CARD" banner (below blue header)
+    doc.rect(x, headerBottom, CARD_W, BANNER_H).fill('#c62828');
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.text('STUDENT IDENTITY CARD', x, headerBottom + 3, { width: CARD_W, align: 'center' });
+
+    let curY = headerBottom + BANNER_H + 8;
 
     // Student photo (centered)
     const PHOTO_W = 72;
@@ -117,7 +145,6 @@ async function drawFrontCard(doc: any, logoBuf: Buffer | null, photoBuf: Buffer 
         ['Roll No', String(student.rollNumber ?? '—')],
         ["Father's Name", student.fatherName || '—'],
         ['D.O.B', fmtDate(student.dateOfBirth)],
-        ['Blood Group', student.bloodGroup || '—'],
         ['Contact', student.phone || '—'],
     ];
 
@@ -139,12 +166,27 @@ async function drawFrontCard(doc: any, logoBuf: Buffer | null, photoBuf: Buffer 
     // Bottom line separator
     curY += 4;
     doc.lineWidth(0.5).strokeColor('#1a237e').moveTo(x + M, curY).lineTo(x + CARD_W - M, curY).stroke();
-    curY += 6;
+    curY += 8;
 
-    // Authorized signature
+    // Principal only (same position as previous Authorized Signatory — right side)
+    const sigSlotW = 90;
+    const sigRightX = x + CARD_W - M - sigSlotW;
+    const SIG_IMG_W = Math.min(78, sigSlotW - 4);
+    const SIG_IMG_H = 24;
+
+    let lineY = curY + 2;
+    if (principalSigBuf) {
+        try {
+            doc.image(principalSigBuf, sigRightX + (sigSlotW - SIG_IMG_W) / 2, curY, { width: SIG_IMG_W, height: SIG_IMG_H });
+            lineY = curY + SIG_IMG_H + 3;
+        } catch {
+            lineY = curY + 2;
+        }
+    }
+
+    doc.lineWidth(0.5).strokeColor('#888888').moveTo(sigRightX, lineY).lineTo(sigRightX + sigSlotW, lineY).stroke();
     doc.fontSize(6).font('Helvetica').fillColor('#888888');
-    doc.text('Authorized Signatory', x + CARD_W - M - 90, curY, { width: 90, align: 'center' });
-    doc.lineWidth(0.5).strokeColor('#888').moveTo(x + CARD_W - M - 90, curY - 1).lineTo(x + CARD_W - M, curY - 1).stroke();
+    doc.text('Principal', sigRightX, lineY + 2, { width: sigSlotW, align: 'center' });
 }
 
 async function drawBackCard(doc: any, _logoBuf: Buffer | null, opts: IdCardPDFOptions, cx: number, cy: number) {
@@ -214,31 +256,28 @@ async function drawBackCard(doc: any, _logoBuf: Buffer | null, opts: IdCardPDFOp
         curY += 16;
     }
 
-    // Terms
-    curY = y + CARD_H - 100;
-    doc.rect(x + M, curY, CARD_W - M * 2, 55).fill('#fff8e1');
-    doc.lineWidth(0.5).strokeColor('#f9a825').rect(x + M, curY, CARD_W - M * 2, 55).stroke();
-    curY += 5;
-    doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#e65100');
-    doc.text('IMPORTANT INSTRUCTIONS:', x + M + 6, curY, { width: CARD_W - M * 2 - 12 });
-    curY += 10;
+    // Important instructions — directly below the sections above (no gap to card bottom)
+    curY += 8;
     const instructions = [
         '1. This card must be carried at all times.',
         '2. If found, please return to the school office.',
         '3. This card is non-transferable.',
         '4. Report loss immediately to the school.',
     ];
-    doc.fontSize(6).font('Helvetica').fillColor('#333333');
-    instructions.forEach(line => {
-        doc.text(line, x + M + 6, curY, { width: CARD_W - M * 2 - 12 });
-        curY += 9;
-    });
+    const instrBoxTop = curY;
+    const instrBoxH = 58;
+    doc.rect(x + M, instrBoxTop, CARD_W - M * 2, instrBoxH).fill('#fff8e1');
+    doc.lineWidth(0.5).strokeColor('#f9a825').rect(x + M, instrBoxTop, CARD_W - M * 2, instrBoxH).stroke();
 
-    // Principal signature
-    const sigY = y + CARD_H - 35;
-    doc.lineWidth(0.5).strokeColor('#555').moveTo(x + CARD_W - M - 100, sigY).lineTo(x + CARD_W - M, sigY).stroke();
-    doc.fontSize(6).font('Helvetica').fillColor('#888');
-    doc.text('Principal', x + CARD_W - M - 100, sigY + 3, { width: 100, align: 'center' });
+    let iy = instrBoxTop + 5;
+    doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#e65100');
+    doc.text('IMPORTANT INSTRUCTIONS:', x + M + 6, iy, { width: CARD_W - M * 2 - 12 });
+    iy += 10;
+    doc.fontSize(6).font('Helvetica').fillColor('#333333');
+    instructions.forEach((line) => {
+        doc.text(line, x + M + 6, iy, { width: CARD_W - M * 2 - 12 });
+        iy += 9;
+    });
 }
 
 export async function generateIdCardPDF(opts: IdCardPDFOptions): Promise<Buffer> {
@@ -247,9 +286,10 @@ export async function generateIdCardPDF(opts: IdCardPDFOptions): Promise<Buffer>
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
 
-    const [logoBuf, photoBuf] = await Promise.all([
+    const [logoBuf, photoBuf, principalSigBuf] = await Promise.all([
         fetchImageBuffer(school.logo),
         fetchImageBuffer(student.photo),
+        fetchImageBuffer((school as ISchool & { principalSignature?: string }).principalSignature),
     ]);
 
     const leftX = (PW / 2 - CARD_W) / 2;
@@ -257,7 +297,7 @@ export async function generateIdCardPDF(opts: IdCardPDFOptions): Promise<Buffer>
     const topY = 40;
 
     // Front card (left)
-    await drawFrontCard(doc, logoBuf, photoBuf, opts, leftX, topY);
+    await drawFrontCard(doc, logoBuf, photoBuf, principalSigBuf, opts, leftX, topY);
 
     // Back card (right)
     await drawBackCard(doc, logoBuf, opts, rightX, topY);

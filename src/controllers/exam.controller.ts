@@ -219,12 +219,48 @@ class ExamController {
             const exams = await Exam.find({ _id: { $in: examIds } }).lean();
             const examMap = new Map(exams.map(e => [e._id.toString(), e]));
 
+            /** Per exam + class + section: rank by percentage (then total obtained) so each exam shows correct rank without running merit list */
+            const cohortKey = (examId: string, cls: string, sec: string) => `${examId}::${cls}::${sec}`;
+            const cohortKeys = new Map<string, { examId: string; class: string; section: string }>();
+            for (const r of allResults) {
+                const eid = r.examId.toString();
+                const cls = String(r.class ?? '');
+                const sec = String(r.section ?? '');
+                const ck = cohortKey(eid, cls, sec);
+                if (!cohortKeys.has(ck)) cohortKeys.set(ck, { examId: eid, class: cls, section: sec });
+            }
+            const rankByCohort = new Map<string, Map<string, number>>();
+            await Promise.all(
+                [...cohortKeys.values()].map(async (k) => {
+                    const cohort = await ExamResult.find({
+                        schoolId: req.schoolId,
+                        examId: k.examId,
+                        class: k.class,
+                        section: k.section,
+                    })
+                        .sort({ percentage: -1, totalObtained: -1 })
+                        .select('studentId')
+                        .lean();
+                    const m = new Map<string, number>();
+                    cohort.forEach((doc, i) => {
+                        const sid = (doc.studentId as any)?.toString?.() ?? String(doc.studentId);
+                        m.set(sid, i + 1);
+                    });
+                    rankByCohort.set(cohortKey(k.examId, k.class, k.section), m);
+                })
+            );
+
+            const sidStr = studentId.toString();
             const examResults = allResults
                 .map(r => {
                     const exam = examMap.get(r.examId.toString());
+                    const ck = cohortKey(r.examId.toString(), String(r.class ?? ''), String(r.section ?? ''));
+                    const computedRank = rankByCohort.get(ck)?.get(sidStr);
+                    const rank = computedRank ?? r.rank;
                     return {
                         examTitle: exam?.title || 'Exam',
                         examType: exam?.type,
+                        examDate: exam?.startDate,
                         subjects: r.subjects.map((s: any) => ({
                             subject: s.subject,
                             maxMarks: s.maxMarks,
@@ -234,7 +270,7 @@ class ExamController {
                         totalObtained: r.totalObtained,
                         percentage: r.percentage,
                         grade: r.grade,
-                        rank: r.rank,
+                        rank,
                     };
                 })
                 .sort((a, b) => {
@@ -242,9 +278,20 @@ class ExamController {
                     return order.indexOf(a.examType || '') - order.indexOf(b.examType || '');
                 });
 
+            const strengthFilter: Record<string, unknown> = {
+                schoolId: req.schoolId,
+                isActive: true,
+                class: student.class,
+            };
+            if (student.section != null && String(student.section).trim() !== '') {
+                strengthFilter.section = student.section;
+            }
+            const classStrength = await Student.countDocuments(strengthFilter);
+
             const buffer = await generateReportCardPDF({
                 school,
                 sessionYear: (activeSession as any)?.sessionYear,
+                classStrength,
                 student: {
                     firstName: student.firstName,
                     lastName: student.lastName,
