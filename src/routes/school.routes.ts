@@ -11,6 +11,14 @@ router.post('/register', SchoolController.register);
 // Public school info (for student/parent portals)
 router.get('/public/:code', SchoolController.getPublicByCode);
 
+// Master admin school deletion (must be before multitenant middleware)
+router.delete(
+    '/:schoolId',
+    protect,
+    authorize(UserRole.SUPER_ADMIN),
+    SchoolController.deleteSchoolByMaster
+);
+
 // Protected routes
 router.use(protect);
 router.use(multitenant);

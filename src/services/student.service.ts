@@ -4,8 +4,6 @@ import SchoolRepository from '../repositories/school.repository';
 import SessionRepository from '../repositories/session.repository';
 import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
-import StudentFee from '../models/studentFee.model';
-import FeePayment from '../models/feePayment.model';
 import { getTenantFilter } from '../utils/tenant';
 import { updateUsageForSchool } from './usage.service';
 
@@ -137,7 +135,8 @@ class StudentService {
     }
 
     /**
-     * Soft delete student
+     * Delete student
+     * NOTE: cascade cleanup is handled in CascadeDeleteService.
      */
     async deleteStudent(schoolId: string, id: string): Promise<void> {
         const filter = getTenantFilter(schoolId, { _id: id });
@@ -146,24 +145,7 @@ class StudentService {
             throw new ErrorResponse('Student not found', 404);
         }
 
-        // If student is in Class 12, mark as PASSED_OUT. Otherwise, delete permanently.
-        const isClass12 = ['12', 'XII', '12th'].includes(student.class);
-
-        if (isClass12) {
-            await StudentRepository.update(id, {
-                isActive: false,
-                status: StudentStatus.PASSED_OUT,
-            });
-        } else {
-            await StudentRepository.delete(id);
-
-            // Also remove fee-related data so deleted students do not appear as "Unknown" in fee reports.
-            // This cascades the deletion to StudentFee and FeePayment documents for this student.
-            await Promise.all([
-                StudentFee.deleteMany({ schoolId, studentId: id }),
-                FeePayment.deleteMany({ schoolId, studentId: id }),
-            ]);
-        }
+        await StudentRepository.delete(id);
 
         await updateUsageForSchool(schoolId);
     }

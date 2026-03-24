@@ -1,13 +1,11 @@
 import { Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/user.model';
-import Salary from '../models/salary.model';
-import SalaryStructure from '../models/salaryStructure.model';
-import OtherPayment from '../models/otherPayment.model';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 import { checkTeacherLimit } from '../services/planLimit.service';
 import { updateUsageForSchool } from '../services/usage.service';
+import CascadeDeleteService from '../services/cascadeDelete.service';
 
 class UserController {
     /**
@@ -213,23 +211,23 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to delete this user`, 401));
             }
 
-            const schoolId = user.schoolId?.toString();
-            const wasTeacher = user.role === UserRole.TEACHER;
-            const staffId = user._id;
+            await CascadeDeleteService.deleteStaffCascade(req.schoolId!, req.params.id);
 
-            // Cascade delete all records related to this staff member
-            await Promise.all([
-                Salary.deleteMany({ staffId }),
-                SalaryStructure.deleteMany({ staffId }),
-                OtherPayment.deleteMany({ staffId }),
-            ]);
+            return res.status(200).json({
+                success: true,
+                data: {}
+            });
+        } catch (error) {
+            return next(error);
+        }
+    }
 
-            await User.findByIdAndDelete(req.params.id);
-
-            if (wasTeacher && schoolId) {
-                await updateUsageForSchool(schoolId);
-            }
-
+    /**
+     * Delete staff by explicit staffId route alias
+     */
+    async deleteStaff(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            await CascadeDeleteService.deleteStaffCascade(req.schoolId!, req.params.staffId);
             return res.status(200).json({
                 success: true,
                 data: {}

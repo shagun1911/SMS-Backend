@@ -37,6 +37,8 @@ export interface ReportCardOptions {
         grade: string;
         rank?: number;
     }[];
+    /** Optional: hide rank-progress graph for single-exam report cards */
+    includeRankProgressChart?: boolean;
 }
 
 function truncLabel(s: string, max: number): string {
@@ -157,7 +159,14 @@ function drawRow(doc: any, y: number, cols: { text: string; x: number; w: number
 }
 
 export async function generateReportCardPDF(opts: ReportCardOptions): Promise<Buffer> {
-    const { school, student, examResults, sessionYear, classStrength } = opts;
+    const {
+        school,
+        student,
+        examResults,
+        sessionYear,
+        classStrength,
+        includeRankProgressChart = true,
+    } = opts;
     const doc = new PDFDocument({ size: 'A4', margin: M, bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
@@ -338,7 +347,7 @@ export async function generateReportCardPDF(opts: ReportCardOptions): Promise<Bu
 
     // ── EXAM RANK PROGRESS (same data as student profile graph) ──
     const hasRankData = examResults.some(e => e.rank != null && Number(e.rank) > 0);
-    if (hasRankData) {
+    if (includeRankProgressChart && hasRankData) {
         const chartBlockMinH = 210;
         if (y > PH - chartBlockMinH) {
             doc.addPage();

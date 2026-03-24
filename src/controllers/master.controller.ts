@@ -11,6 +11,7 @@ import User from '../models/user.model';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 import config from '../config';
+import CascadeDeleteService from '../services/cascadeDelete.service';
 
 export class MasterController {
     /** GET /master/dashboard – clean SaaS dashboard */
@@ -272,6 +273,16 @@ export class MasterController {
             });
             if (!school) return next(new ErrorResponse(`School not found with id of ${req.params.id}`, 404));
             return sendResponse(res, school, 'Updated', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /** DELETE /master/schools/:id – hard delete school with full cascade */
+    async deleteSchool(req: Request, res: Response, next: NextFunction) {
+        try {
+            await CascadeDeleteService.deleteSchoolCascade(req.params.id);
+            return sendResponse(res, null, 'School and related data deleted successfully', 200);
         } catch (error) {
             next(error);
         }

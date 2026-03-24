@@ -16,6 +16,7 @@ router.patch('/:id', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER), ExamCon
 router.delete('/:id', authorize(UserRole.SCHOOL_ADMIN), ExamController.deleteExam);
 
 router.get('/report-card/:studentId', ExamController.getReportCardPdf);
+router.get('/:examId/report-card/:studentId', ExamController.getExamReportCardPdf);
 
 router.post('/:examId/results', authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER), ExamController.addResults);
 router.get('/:examId/results', ExamController.getExamResults);

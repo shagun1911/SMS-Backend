@@ -10,6 +10,7 @@ import School from '../models/school.model';
 import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit.service';
 import Plan from '../models/plan.model';
 import { Types } from 'mongoose';
+import CascadeDeleteService from '../services/cascadeDelete.service';
 
 class SchoolController {
     /**
@@ -187,6 +188,19 @@ class SchoolController {
         try {
             const plans = await Plan.find({ isActive: true }).sort({ priceMonthly: 1 }).lean();
             sendResponse(res, plans, 'OK', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    /**
+     * Master Admin: delete school with full cascade
+     * DELETE /schools/:schoolId
+     */
+    async deleteSchoolByMaster(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            await CascadeDeleteService.deleteSchoolCascade(req.params.schoolId);
+            sendResponse(res, null, 'School and related data deleted successfully', 200);
         } catch (error) {
             next(error);
         }

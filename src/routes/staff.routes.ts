@@ -9,17 +9,7 @@ router.use(protect);
 router.use(multitenant);
 router.use(authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN));
 
-router.route('/')
-    .get(UserController.getUsers)
-    .post(UserController.createUser);
-
-router.route('/:id')
-    .get(UserController.getUser)
-    .put(UserController.updateUser)
-    .delete(UserController.deleteUser);
-
-router.delete('/staff/:staffId', UserController.deleteStaff);
-
-router.post('/:id/set-password', UserController.setPassword);
+// Alias endpoint for explicit staff deletion trigger
+router.delete('/:staffId', UserController.deleteStaff);
 
 export default router;

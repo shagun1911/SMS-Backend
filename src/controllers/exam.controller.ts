@@ -319,6 +319,90 @@ class ExamController {
         }
     }
 
+    async getExamReportCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { examId, studentId } = req.params;
+            const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId, isActive: true });
+            if (!student) return next(new ErrorResponse('Student not found', 404));
+            const school = await School.findById(req.schoolId);
+            if (!school) return next(new ErrorResponse('School not found', 404));
+            const activeSession = await Session.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+            const exam = await Exam.findOne({ _id: examId, schoolId: req.schoolId }).lean();
+            if (!exam) return next(new ErrorResponse('Exam not found', 404));
+
+            const result = await ExamResult.findOne({ schoolId: req.schoolId, studentId, examId }).lean();
+            if (!result) return next(new ErrorResponse('No exam result found for this student in selected exam', 404));
+
+            const cohort = await ExamResult.find({
+                schoolId: req.schoolId,
+                examId,
+                class: result.class,
+                section: result.section,
+            })
+                .sort({ percentage: -1, totalObtained: -1 })
+                .select('studentId')
+                .lean();
+            const computedRank = cohort.findIndex((r: any) => String(r.studentId) === String(studentId));
+            const rank = computedRank >= 0 ? computedRank + 1 : result.rank;
+
+            const strengthFilter: Record<string, unknown> = {
+                schoolId: req.schoolId,
+                isActive: true,
+                class: student.class,
+            };
+            if (student.section != null && String(student.section).trim() !== '') {
+                strengthFilter.section = student.section;
+            }
+            const classStrength = await Student.countDocuments(strengthFilter);
+
+            const buffer = await generateReportCardPDF({
+                school,
+                sessionYear: (activeSession as any)?.sessionYear,
+                classStrength,
+                includeRankProgressChart: false,
+                student: {
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    admissionNumber: student.admissionNumber,
+                    class: student.class,
+                    section: student.section,
+                    rollNumber: student.rollNumber,
+                    fatherName: student.fatherName,
+                    motherName: (student as any).motherName,
+                    dateOfBirth: (student as any).dateOfBirth,
+                    photo: (student as any).photo,
+                },
+                examResults: [{
+                    examTitle: exam.title || 'Exam',
+                    examType: exam.type,
+                    examDate: exam.startDate,
+                    subjects: result.subjects.map((s: any) => ({
+                        subject: s.subject,
+                        maxMarks: s.maxMarks,
+                        obtainedMarks: s.obtainedMarks,
+                    })),
+                    totalMarks: result.totalMarks,
+                    totalObtained: result.totalObtained,
+                    percentage: result.percentage,
+                    grade: result.grade,
+                    rank,
+                }],
+            });
+
+            res.setHeader('Content-Type', 'application/pdf');
+            const isPreview = req.query.preview === '1' || req.query.preview === 'true';
+            res.setHeader(
+                'Content-Disposition',
+                isPreview
+                    ? 'inline'
+                    : `attachment; filename=report-card-${studentId}-${examId}.pdf`
+            );
+            res.send(buffer);
+        } catch (error) {
+            return next(error);
+        }
+    }
+
     async getAdmitCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { examId, studentId } = req.params;

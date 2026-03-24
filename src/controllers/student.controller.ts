@@ -10,6 +10,7 @@ import Session from '../models/session.model';
 import { sendResponse } from '../utils/response';
 import ErrorResponse from '../utils/errorResponse';
 import { generateIdCardPDF } from '../services/pdfIdCard.service';
+import CascadeDeleteService from '../services/cascadeDelete.service';
 
 class StudentController {
     /**
@@ -158,11 +159,11 @@ class StudentController {
     }
 
     /**
-     * Delete student (Soft Delete)
+     * Delete student (hard delete + cascade cleanup)
      */
     async deleteStudent(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
-            await StudentService.deleteStudent(req.schoolId!, req.params.id);
+            await CascadeDeleteService.deleteStudentCascade(req.schoolId!, req.params.id);
 
             res.status(200).json({
                 success: true,
