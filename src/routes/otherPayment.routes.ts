@@ -10,6 +10,12 @@ const router = Router();
 router.use(protect, multitenant);
 
 router.get(
+    '/me',
+    authorize(UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER),
+    OtherPaymentController.listMine
+);
+
+router.get(
     '/staff/:staffId',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
     OtherPaymentController.listForStaff

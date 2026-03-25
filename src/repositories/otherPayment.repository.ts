@@ -24,6 +24,21 @@ class OtherPaymentRepository extends BaseRepository<IOtherPayment> {
             schoolId,
             staffId,
             date: { $gte: from, $lte: to },
+            isSettled: false,
+        }).sort({ date: 1 }).exec();
+    }
+
+    async findSettledByStaffAndDateRange(
+        schoolId: string,
+        staffId: string,
+        from: Date,
+        to: Date
+    ): Promise<IOtherPayment[]> {
+        return await this.model.find({
+            schoolId,
+            staffId,
+            date: { $gte: from, $lte: to },
+            isSettled: true,
         }).sort({ date: 1 }).exec();
     }
 }

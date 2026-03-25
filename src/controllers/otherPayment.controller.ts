@@ -4,6 +4,17 @@ import SalaryService from '../services/salary.service';
 import { sendResponse } from '../utils/response';
 
 class OtherPaymentController {
+    /** GET /salary-other-payments/me — logged-in staff (teacher, etc.) sees own bonuses/adjustments */
+    async listMine(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const staffId = req.user!._id.toString();
+            const records = await SalaryService.listOtherPayments(req.schoolId!, staffId);
+            sendResponse(res, records, 'Other payments fetched', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
+
     async listForStaff(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { staffId } = req.params;

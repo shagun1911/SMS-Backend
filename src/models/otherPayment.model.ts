@@ -38,6 +38,12 @@ const otherPaymentSchema = new Schema<IOtherPayment, IOtherPaymentModel>(
             type: String,
             trim: true,
         },
+        // When true, this has already been paid/deducted as a direct transaction
+        // and must not increase/decrease monthly payroll due.
+        isSettled: {
+            type: Boolean,
+            default: true,
+        },
     },
     {
         timestamps: true,

@@ -100,8 +100,9 @@ export const TEACHER_PERMISSIONS = {
 } as const;
 
 /**
- * Allow SCHOOL_ADMIN, SUPER_ADMIN, or TEACHER with the given permission.
- * Use for routes that teachers can access only if granted (e.g. edit timetable, view bus routes).
+ * Allow SCHOOL_ADMIN, SUPER_ADMIN, or school staff.
+ * Timetable edits are allowed for all teachers / accountant / transport staff (no per-user flag).
+ * Other permission keys still use the teacher grants list when added to this middleware later.
  */
 export const requirePermission = (permission: string) => {
     return (req: AuthRequest, _res: Response, next: NextFunction) => {
@@ -114,6 +115,12 @@ export const requirePermission = (permission: string) => {
         if (role === UserRole.SUPER_ADMIN || role === UserRole.SCHOOL_ADMIN) {
             return next();
         }
+        if (
+            permission === TEACHER_PERMISSIONS.EDIT_TIMETABLE &&
+            (role === UserRole.TEACHER || role === UserRole.ACCOUNTANT || role === UserRole.TRANSPORT_MANAGER)
+        ) {
+            return next();
+        }
         if (role === UserRole.TEACHER && Array.isArray(perms) && perms.includes(permission)) {
             return next();
         }
@@ -122,19 +129,20 @@ export const requirePermission = (permission: string) => {
 };
 
 /**
- * Allow SCHOOL_ADMIN, SUPER_ADMIN, TRANSPORT_MANAGER, or TEACHER with view_transport.
- * Use for transport (bus routes) read access.
+ * Allow school staff to read transport (bus routes). No per-teacher flag required.
  */
 export const requireTransportView = (req: AuthRequest, _res: Response, next: NextFunction) => {
     if (!req.user) {
         return next(new ErrorResponse('Not authorized', 401));
     }
     const role = req.user.role as UserRole;
-    const perms = (req.user as any).permissions || [];
-    if (role === UserRole.SUPER_ADMIN || role === UserRole.SCHOOL_ADMIN || role === UserRole.TRANSPORT_MANAGER) {
-        return next();
-    }
-    if (role === UserRole.TEACHER && Array.isArray(perms) && perms.includes(TEACHER_PERMISSIONS.VIEW_TRANSPORT)) {
+    if (
+        role === UserRole.SUPER_ADMIN ||
+        role === UserRole.SCHOOL_ADMIN ||
+        role === UserRole.TRANSPORT_MANAGER ||
+        role === UserRole.ACCOUNTANT ||
+        role === UserRole.TEACHER
+    ) {
         return next();
     }
     return next(new ErrorResponse('You do not have permission to view transport', 403));

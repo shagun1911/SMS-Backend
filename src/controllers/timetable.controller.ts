@@ -1,4 +1,5 @@
 import { Response, NextFunction } from 'express';
+import { Types } from 'mongoose';
 import { AuthRequest } from '../types';
 import Timetable from '../models/timetable.model';
 import TimetableSettings from '../models/timetableSettings.model';
@@ -14,8 +15,110 @@ import {
     normalizeTimetableBreaks,
     timetableColumnCount,
     buildScheduleColumnDtos,
+    buildSlotPlanFromSettings,
     TimetableBreakInput,
 } from '../utils/timetableSchedule';
+
+function normTimetableClassName(s: string): string {
+    return String(s ?? '')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+/** True only if legacy Timetable rows have real slot content (not empty placeholders). */
+function legacyTimetableHasDisplayableSlots(legacy: any[]): boolean {
+    if (!Array.isArray(legacy) || legacy.length === 0) return false;
+    return legacy.some((t: any) =>
+        (t.slots || []).some((s: any) => {
+            const subj = s?.subject != null && String(s.subject).trim() !== '';
+            const hasTeacher = !!s?.teacherId;
+            const tpe = s?.type;
+            const isBreakLike = tpe === 'break' || tpe === 'lunch' || tpe === 'assembly';
+            return subj || hasTeacher || isBreakLike;
+        })
+    );
+}
+
+/** When legacy Timetable docs are empty or meaningless, build Mon–Sat rows from SchoolTimetableGrid (admin “Save Timetable”). */
+function schoolIdForQuery(schoolId: string) {
+    return Types.ObjectId.isValid(schoolId) ? new Types.ObjectId(schoolId) : schoolId;
+}
+
+async function timetablesFromSchoolGrid(schoolId: string, className: string, section: string) {
+    const cn = normTimetableClassName(className);
+    const sec = String(section).trim().toUpperCase() || 'A';
+    const sid = schoolIdForQuery(schoolId);
+    const settings = await TimetableSettings.findOne({ schoolId: sid, isActive: true }).lean();
+    const grid = await SchoolTimetableGrid.findOne({ schoolId: sid })
+        .populate('rows.cells.teacherId', 'name')
+        .lean();
+    const rows = (grid as any)?.rows || [];
+
+    const rowMatches = (r: any) => {
+        const rn = normTimetableClassName(String(r.className ?? ''));
+        const rs = String(r.section || 'A').trim().toUpperCase();
+        return rn === cn && rs === sec;
+    };
+
+    let row = rows.find(rowMatches);
+    if (!row) {
+        row = rows.find(
+            (r: any) =>
+                normTimetableClassName(String(r.className ?? '')).toLowerCase() === cn.toLowerCase() &&
+                String(r.section || 'A').trim().toUpperCase() === sec
+        );
+    }
+    if (!row) {
+        const cnDigits = cn.replace(/\D/g, '');
+        if (cnDigits) {
+            row = rows.find((r: any) => {
+                const rd = normTimetableClassName(String(r.className ?? '')).replace(/\D/g, '');
+                return rd === cnDigits && String(r.section || 'A').trim().toUpperCase() === sec;
+            });
+        }
+    }
+    if (!row) {
+        const sameName = rows.filter(
+            (r: any) =>
+                normTimetableClassName(String(r.className ?? '')).toLowerCase() === cn.toLowerCase()
+        );
+        if (sameName.length === 1) row = sameName[0];
+    }
+
+    if (!row || !Array.isArray(row.cells)) return [];
+
+    const slotPlan = buildSlotPlanFromSettings(settings as any);
+    const cells = row.cells as any[];
+    const slots: any[] = [];
+    for (let i = 0; i < slotPlan.length; i++) {
+        const plan = slotPlan[i];
+        const cell = cells[i] || {};
+        if (plan.kind === 'break') {
+            const isLunch = /lunch/i.test(plan.label);
+            slots.push({
+                startTime: plan.startTime,
+                endTime: plan.endTime,
+                type: isLunch ? 'lunch' : 'break',
+                subject: plan.label,
+                title: plan.label,
+            });
+        } else {
+            const tid = cell.teacherId;
+            slots.push({
+                startTime: plan.startTime,
+                endTime: plan.endTime,
+                type: 'period',
+                subject: cell.subject || '',
+                teacherId: tid && typeof tid === 'object' && 'name' in tid ? tid : tid,
+            });
+        }
+    }
+
+    return [1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+        dayOfWeek,
+        slots: slots.map((s) => ({ ...s })),
+    }));
+}
 
 function getTeacherConflicts(
     schoolId: string,
@@ -268,13 +371,38 @@ class TimetableController {
 
     async getTimetables(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const { className, section } = req.query;
+            const rawClass = (req.query.className || req.query.class) as string | undefined;
+            const rawSection = req.query.section as string | undefined;
+            const className = rawClass != null ? String(rawClass).trim() : undefined;
+            const section =
+                rawSection != null && String(rawSection).trim() !== ''
+                    ? String(rawSection).trim().toUpperCase()
+                    : undefined;
+
             const filter: any = { schoolId: req.schoolId, isActive: true };
             if (className) filter.className = className;
             if (section) filter.section = section;
-            const timetables = await Timetable.find(filter)
+
+            let timetables: any[] = await Timetable.find(filter)
                 .populate('slots.teacherId', 'name')
-                .sort({ dayOfWeek: 1 });
+                .sort({ dayOfWeek: 1 })
+                .lean();
+
+            const useGridFallback =
+                className &&
+                section &&
+                req.schoolId &&
+                (!timetables ||
+                    timetables.length === 0 ||
+                    !legacyTimetableHasDisplayableSlots(timetables));
+
+            if (useGridFallback && req.schoolId && className && section) {
+                const fromGrid = await timetablesFromSchoolGrid(req.schoolId, className, section);
+                if (fromGrid.length > 0) {
+                    timetables = fromGrid;
+                }
+            }
+
             return sendResponse(res, timetables, 'Timetables retrieved', 200);
         } catch (error) {
             return next(error);
@@ -287,12 +415,37 @@ class TimetableController {
             const sectionFromQuery = req.query.section as string | undefined;
             const cls = await Class.findOne({ _id: classId, schoolId: req.schoolId });
             if (!cls) return next(new ErrorResponse('Class not found', 404));
-            const section = sectionFromQuery || (cls as any).section || (cls as any).sections?.[0] || 'A';
-            const filter = { schoolId: req.schoolId, className: cls.className, section, isActive: true };
-            const timetables = await Timetable.find(filter)
+            const sectionNorm =
+                (sectionFromQuery != null && String(sectionFromQuery).trim() !== ''
+                    ? String(sectionFromQuery).trim()
+                    : String((cls as any).section || 'A').trim()
+                ).toUpperCase() || 'A';
+
+            const filter = {
+                schoolId: req.schoolId,
+                className: cls.className,
+                section: sectionNorm,
+                isActive: true,
+            };
+            let timetables: any[] = await Timetable.find(filter)
                 .populate('slots.teacherId', 'name')
                 .sort({ dayOfWeek: 1 })
                 .lean();
+
+            const useGrid =
+                req.schoolId &&
+                (!timetables.length || !legacyTimetableHasDisplayableSlots(timetables));
+            if (useGrid && req.schoolId) {
+                const fromGrid = await timetablesFromSchoolGrid(
+                    req.schoolId,
+                    String(cls.className),
+                    sectionNorm
+                );
+                if (fromGrid.length > 0) {
+                    timetables = fromGrid;
+                }
+            }
+
             const days = (timetables as any[]).map((t) => ({
                 dayOfWeek: t.dayOfWeek,
                 slots: (t.slots || []).map((s: any) => ({
@@ -301,11 +454,16 @@ class TimetableController {
                     subject: s.subject,
                     title: s.title,
                     type: s.type,
-                    teacherId: s.teacherId?._id,
-                    teacherName: s.teacherId?.name,
+                    teacherId: s.teacherId?._id ?? s.teacherId,
+                    teacherName: typeof s.teacherId === 'object' && s.teacherId?.name ? s.teacherId.name : undefined,
                 })),
             }));
-            return sendResponse(res, { class: cls, className: cls.className, section, days }, 'Timetable retrieved', 200);
+            return sendResponse(
+                res,
+                { class: cls, className: cls.className, section: sectionNorm, days },
+                'Timetable retrieved',
+                200
+            );
         } catch (error) {
             return next(error);
         }

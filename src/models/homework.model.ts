@@ -7,7 +7,7 @@ export interface IHomework extends Document {
     subject: string;
     title: string;
     description: string;
-    dueDate: Date;
+    dueDate?: Date;
     createdBy: Schema.Types.ObjectId;
     attachmentUrl?: string;
     isActive: boolean;
@@ -23,7 +23,7 @@ const homeworkSchema = new Schema<IHomework>(
         subject: { type: String, required: true, trim: true },
         title: { type: String, required: true, trim: true },
         description: { type: String, required: true, trim: true },
-        dueDate: { type: Date, required: true },
+        dueDate: { type: Date },
         createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         attachmentUrl: { type: String },
         isActive: { type: Boolean, default: true },

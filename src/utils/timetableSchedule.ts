@@ -158,3 +158,40 @@ export function buildScheduleColumnDtos(settings: {
               }
     );
 }
+
+/** Per-column slot template with clock times (periods + breaks) for one school day */
+export type TimetableSlotPlan =
+    | { kind: 'period'; label: string; startTime: string; endTime: string }
+    | { kind: 'break'; label: string; startTime: string; endTime: string };
+
+export function buildSlotPlanFromSettings(
+    settings: {
+        periodCount?: number;
+        firstPeriodStart?: string;
+        periodDurationMinutes?: number;
+        breaks?: TimetableBreakInput[] | null;
+        lunchAfterPeriod?: number;
+        lunchBreakDuration?: number;
+        breakLabel?: string;
+    } | null
+): TimetableSlotPlan[] {
+    const periodCount = settings?.periodCount ?? 7;
+    const first = settings?.firstPeriodStart || '08:00';
+    const pd = settings?.periodDurationMinutes ?? 40;
+    const breaks = normalizeTimetableBreaks(settings || {});
+    const cols = buildTimetableColumns(periodCount, first, pd, breaks);
+    const out: TimetableSlotPlan[] = [];
+    let mins = parseTimeToMins(first);
+    for (const c of cols) {
+        if (c.kind === 'break') {
+            const start = formatMins(mins);
+            mins += c.durationMinutes;
+            const end = formatMins(mins);
+            out.push({ kind: 'break', label: c.label, startTime: start, endTime: end });
+        } else {
+            out.push({ kind: 'period', label: c.label, startTime: c.startTime, endTime: c.endTime });
+            mins = parseTimeToMins(c.endTime);
+        }
+    }
+    return out;
+}

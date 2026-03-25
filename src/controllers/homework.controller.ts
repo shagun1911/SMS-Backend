@@ -9,9 +9,15 @@ class HomeworkController {
     async create(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { className, section, subject, title, description, dueDate, attachmentUrl } = req.body;
-            if (!className || !section || !subject || !title || !description || !dueDate) {
-                return next(new ErrorResponse('className, section, subject, title, description, dueDate are required', 400));
+            if (!className || !section || !subject || !title || !description) {
+                return next(new ErrorResponse('className, section, subject, title, description are required', 400));
             }
+
+            const parsedDueDate = dueDate ? new Date(dueDate) : undefined;
+            if (dueDate && Number.isNaN(parsedDueDate!.getTime())) {
+                return next(new ErrorResponse('dueDate is invalid', 400));
+            }
+
             const homework = await Homework.create({
                 schoolId: req.schoolId,
                 className,
@@ -19,7 +25,7 @@ class HomeworkController {
                 subject,
                 title,
                 description,
-                dueDate: new Date(dueDate),
+                ...(parsedDueDate ? { dueDate: parsedDueDate } : {}),
                 createdBy: req.user!._id,
                 attachmentUrl,
             });

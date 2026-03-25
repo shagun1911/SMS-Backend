@@ -397,6 +397,7 @@ export interface IOtherPayment extends Document {
     type: 'bonus' | 'adjustment';
     date: Date;
     notes?: string;
+    isSettled?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }

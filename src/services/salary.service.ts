@@ -90,8 +90,40 @@ class SalaryService {
             .populate('staffId', 'name email role')
             .sort({ createdAt: -1 })
             .lean();
+        const filtered = records.filter((r: any) => r.staffId?.role !== UserRole.SCHOOL_ADMIN);
 
-        return records.filter((r: any) => r.staffId?.role !== UserRole.SCHOOL_ADMIN);
+        const enriched = await Promise.all(
+            filtered.map(async (r: any) => {
+                const monthStart = new Date(r.year, new Date(`${r.month} 1, ${r.year}`).getMonth(), 1);
+                const monthEnd = new Date(monthStart);
+                monthEnd.setMonth(monthEnd.getMonth() + 1);
+                monthEnd.setDate(monthEnd.getDate() - 1);
+
+                const settled = await OtherPaymentRepository.findSettledByStaffAndDateRange(
+                    schoolId,
+                    String(r.staffId?._id ?? r.staffId),
+                    monthStart,
+                    monthEnd
+                );
+
+                const settledBonusTotal = settled
+                    .filter((p: any) => p.type === 'bonus')
+                    .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+                const settledAdjustmentTotal = settled
+                    .filter((p: any) => p.type === 'adjustment')
+                    .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+                return {
+                    ...r,
+                    settledOtherPayments: settled,
+                    settledBonusTotal,
+                    settledAdjustmentTotal,
+                    settledExtraNet: settledBonusTotal - settledAdjustmentTotal,
+                };
+            })
+        );
+
+        return enriched;
     }
 
     /**
@@ -488,9 +520,10 @@ class SalaryService {
             type: 'bonus' | 'adjustment';
             date: Date;
             notes?: string;
+            isSettled?: boolean;
         }
     ): Promise<IOtherPayment> {
-        return await OtherPaymentRepository.create({
+        const record = await OtherPaymentRepository.create({
             schoolId: new Types.ObjectId(schoolId) as any,
             staffId: new Types.ObjectId(staffId) as any,
             title: payload.title,
@@ -498,7 +531,32 @@ class SalaryService {
             type: payload.type,
             date: payload.date,
             notes: payload.notes,
+            isSettled: payload.isSettled ?? true,
         } as any);
+
+        // Notify staff for direct bonus/deduction transactions.
+        const amountText = payload.amount.toLocaleString('en-IN');
+        const isBonus = payload.type === 'bonus';
+        await UserNotification.create({
+            userId: new Types.ObjectId(staffId),
+            schoolId: new Types.ObjectId(schoolId),
+            title: isBonus ? 'Bonus Credited' : 'Salary Adjustment Applied',
+            message: isBonus
+                ? `₹${amountText} has been credited as "${payload.title}".`
+                : `₹${amountText} has been adjusted as "${payload.title}".`,
+            type: 'salary',
+            metadata: {
+                category: 'other_payment',
+                otherPaymentId: record._id,
+                amount: payload.amount,
+                paymentType: payload.type,
+                title: payload.title,
+                isSettled: payload.isSettled ?? true,
+                date: payload.date,
+            },
+        });
+
+        return record;
     }
 
     /**
