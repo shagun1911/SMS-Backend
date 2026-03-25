@@ -113,11 +113,16 @@ class StudentService {
      */
     async getStudent(schoolId: string, id: string): Promise<IStudent> {
         const filter = getTenantFilter(schoolId, { _id: id });
-        const student = await StudentRepository.findOne(filter);
+        const student = await Student.findOne(filter)
+            .populate(
+                'busId',
+                'routeName busNumber registrationNumber driverName driverPhone conductorName conductorPhone isActive'
+            )
+            .exec();
         if (!student) {
             throw new ErrorResponse('Student not found', 404);
         }
-        return student;
+        return student as IStudent;
     }
 
     /**
