@@ -18,6 +18,8 @@ interface IConfig {
         cloudName: string;
         apiKey: string;
         apiSecret: string;
+        /** True when at least one full account exists in env (used for homework / file uploads). */
+        isConfigured: boolean;
         /** Multiple accounts (e.g. CLOUDINARY_2_CLOUD_NAME, CLOUDINARY_2_API_KEY, CLOUDINARY_2_API_SECRET). Tried in order when one is full. */
         accounts: Array<{ cloudName: string; apiKey: string; apiSecret: string }>;
     };
@@ -92,6 +94,7 @@ const config: IConfig = {
             apiKey: process.env.CLOUDINARY_API_KEY || '',
             apiSecret: process.env.CLOUDINARY_API_SECRET || '',
             accounts,
+            isConfigured: accounts.length > 0,
         };
     })(),
     frontend: (() => {

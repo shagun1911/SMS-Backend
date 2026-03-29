@@ -59,9 +59,9 @@ app.use(
     paymentController.razorpayWebhook
 );
 
-// Body parser
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+// Body parser (homework + attachments can include long text or data URLs when Cloudinary is off)
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Cookie parser
 app.use(cookieParser());

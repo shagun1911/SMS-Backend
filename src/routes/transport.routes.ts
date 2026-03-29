@@ -9,6 +9,11 @@ router.use(protect, multitenant);
 
 // Teachers with view_transport permission can view bus routes (read-only)
 router.get('/', requireTransportView, TransportController.getFleet);
+router.get(
+    '/crew-options',
+    authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN, UserRole.TRANSPORT_MANAGER),
+    TransportController.getCrewOptions
+);
 router.get('/:busId/details', requireTransportView, TransportController.getBusDetails);
 router.post('/', authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN), TransportController.addVehicle);
 router.put(

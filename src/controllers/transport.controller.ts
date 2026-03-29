@@ -1,11 +1,38 @@
 import { Response, NextFunction } from 'express';
-import { AuthRequest } from '../types';
+import { AuthRequest, UserRole } from '../types';
 import Bus from '../models/bus.model';
 import Student from '../models/student.model';
+import User from '../models/user.model';
 import { getTenantFilter } from '../utils/tenant';
 import { sendResponse } from '../utils/response';
 
 class TransportController {
+    /** Active bus drivers & conductors (school admin creates them under Staff). */
+    async getCrewOptions(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const schoolId = req.schoolId!;
+            const base = { schoolId, isActive: { $ne: false } };
+            const [drivers, conductors] = await Promise.all([
+                User.find({ ...base, role: UserRole.BUS_DRIVER })
+                    .select('name phone role')
+                    .sort({ name: 1 })
+                    .lean(),
+                User.find({ ...base, role: UserRole.CONDUCTOR })
+                    .select('name phone role')
+                    .sort({ name: 1 })
+                    .lean(),
+            ]);
+            sendResponse(
+                res,
+                { drivers, conductors },
+                'Transport crew options',
+                200
+            );
+        } catch (error) {
+            next(error);
+        }
+    }
+
     async getFleet(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const filter = getTenantFilter(req.schoolId!);
