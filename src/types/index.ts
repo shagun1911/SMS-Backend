@@ -11,6 +11,11 @@ export enum UserRole {
     TEACHER = 'teacher',
     ACCOUNTANT = 'accountant',
     TRANSPORT_MANAGER = 'transport_manager',
+    BUS_DRIVER = 'bus_driver',
+    CONDUCTOR = 'conductor',
+    CLEANING_STAFF = 'cleaning_staff',
+    /** Use with `staffRoleTitle` for a custom job title. */
+    STAFF_OTHER = 'staff_other',
 }
 
 export interface IUser extends Document {
@@ -23,6 +28,8 @@ export interface IUser extends Document {
     phone: string;
     role: UserRole;
     photo?: string;
+    /** When `role` is `staff_other`, label shown in directory and payroll. */
+    staffRoleTitle?: string;
     subject?: string;
     qualification?: string;
     joiningDate?: Date;
@@ -193,6 +200,8 @@ export interface IStudent extends Document {
     paidAmount?: number;
     dueAmount?: number;
     concessionAmount?: number;
+    /** 0–100; discount on annual recurring (monthly) fees only, not one-time admission items. */
+    concessionPercent?: number;
     initialDepositAmount?: number;
     depositPaymentMode?: string;
     depositDate?: Date;

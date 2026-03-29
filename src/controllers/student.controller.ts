@@ -29,6 +29,7 @@ class StudentController {
                     transactionId: req.body.depositTransactionId,
                     staffId: req.user!._id.toString(),
                     concessionAmount: Number(req.body.concessionAmount) || 0,
+                    concessionPercent: Number(req.body.concessionPercent) || 0,
                 });
                 const updated = await StudentService.getStudent(req.schoolId!, student._id.toString());
                 res.status(201).json({ success: true, data: updated });

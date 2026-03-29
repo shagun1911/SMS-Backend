@@ -13,7 +13,18 @@ export async function updateUsageForSchool(schoolId: string): Promise<void> {
         // Count ALL staff roles (teacher + accountant + transport_manager + schooladmin)
         User.countDocuments({
             schoolId,
-            role: { $in: [UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER, UserRole.SCHOOL_ADMIN] },
+            role: {
+                $in: [
+                    UserRole.TEACHER,
+                    UserRole.ACCOUNTANT,
+                    UserRole.TRANSPORT_MANAGER,
+                    UserRole.SCHOOL_ADMIN,
+                    UserRole.BUS_DRIVER,
+                    UserRole.CONDUCTOR,
+                    UserRole.CLEANING_STAFF,
+                    UserRole.STAFF_OTHER,
+                ],
+            },
             isActive: true,
         }),
     ]);

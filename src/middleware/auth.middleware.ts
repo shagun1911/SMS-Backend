@@ -141,7 +141,9 @@ export const requireTransportView = (req: AuthRequest, _res: Response, next: Nex
         role === UserRole.SCHOOL_ADMIN ||
         role === UserRole.TRANSPORT_MANAGER ||
         role === UserRole.ACCOUNTANT ||
-        role === UserRole.TEACHER
+        role === UserRole.TEACHER ||
+        role === UserRole.BUS_DRIVER ||
+        role === UserRole.CONDUCTOR
     ) {
         return next();
     }
@@ -163,7 +165,7 @@ export const multitenant = (req: AuthRequest, _res: Response, next: NextFunction
     // 👑 Super Admin logic
     if (role === UserRole.SUPER_ADMIN) {
         // Super Admin can specify a schoolId in query, body, or headers to filter context
-        const requestedSchoolId = (req.query.schoolId || req.body.schoolId || req.headers['x-school-id']) as string;
+        const requestedSchoolId = (req.query.schoolId || req.body?.schoolId || req.headers['x-school-id']) as string;
 
         if (requestedSchoolId) {
             req.schoolId = requestedSchoolId;
@@ -190,7 +192,7 @@ export const multitenant = (req: AuthRequest, _res: Response, next: NextFunction
     }
 
     // Check Body (prevent creating/updating data for another school)
-    if (req.body.schoolId && req.body.schoolId !== currentSchoolId) {
+    if (req.body?.schoolId && req.body.schoolId !== currentSchoolId) {
         return next(new ErrorResponse('Security Violation: Attempt to modify data for another tenant blocked', 403));
     }
 
@@ -199,8 +201,12 @@ export const multitenant = (req: AuthRequest, _res: Response, next: NextFunction
         return next(new ErrorResponse('Security Violation: Unauthorized access to specific tenant resources', 403));
     }
 
-    // Auto-inject schoolId into body for POST/PUT requests if not present
+    // Auto-inject schoolId into body for POST/PUT requests if not present.
+    // Multipart uploads have no parsed body yet — initialize {} so multer/body-parser can merge later.
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+            req.body = {};
+        }
         req.body.schoolId = currentSchoolId;
     }
 

@@ -151,6 +151,8 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         paidAmount: { type: Number, default: 0 },
         dueAmount: { type: Number, default: 0 },
         concessionAmount: { type: Number, default: 0 },
+        /** Percentage (0–100) of annual recurring (monthly×session months) fee; does not apply to one-time fees. */
+        concessionPercent: { type: Number, default: 0, min: 0, max: 100 },
         initialDepositAmount: { type: Number, default: 0 },
         depositPaymentMode: { type: String, trim: true },
         depositDate: { type: Date },

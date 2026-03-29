@@ -1,5 +1,11 @@
 import { Schema, model, Document } from 'mongoose';
 
+export interface IHomeworkAttachment {
+    url: string;
+    filename?: string;
+    mimeType?: string;
+}
+
 export interface IHomework extends Document {
     schoolId: Schema.Types.ObjectId;
     className: string;
@@ -9,7 +15,9 @@ export interface IHomework extends Document {
     description: string;
     dueDate?: Date;
     createdBy: Schema.Types.ObjectId;
+    /** @deprecated prefer attachments; kept for older clients */
     attachmentUrl?: string;
+    attachments?: IHomeworkAttachment[];
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -26,6 +34,13 @@ const homeworkSchema = new Schema<IHomework>(
         dueDate: { type: Date },
         createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         attachmentUrl: { type: String },
+        attachments: [
+            {
+                url: { type: String, required: true, trim: true },
+                filename: { type: String, trim: true },
+                mimeType: { type: String, trim: true },
+            },
+        ],
         isActive: { type: Boolean, default: true },
     },
     { timestamps: true }

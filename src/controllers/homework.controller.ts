@@ -4,6 +4,39 @@ import { AuthRequest } from '../types';
 import { sendResponse } from '../utils/response';
 import ErrorResponse from '../utils/errorResponse';
 
+/** Merge legacy `attachmentUrl` with `attachments` for API consumers (mobile / web). */
+function normalizeHomeworkResponse(hw: any): any {
+    if (!hw || typeof hw !== 'object') return hw;
+    const out = { ...hw };
+    const list: any[] = Array.isArray(hw.attachments)
+        ? hw.attachments.map((a: any) => ({ url: a.url, filename: a.filename, mimeType: a.mimeType }))
+        : [];
+    if (hw.attachmentUrl && !list.some((a) => a.url === hw.attachmentUrl)) {
+        list.unshift({ url: hw.attachmentUrl, filename: 'Attachment' });
+    }
+    out.attachments = list;
+    return out;
+}
+
+function parseAttachmentsBody(body: any): Array<{ url: string; filename?: string; mimeType?: string }> {
+    let raw = body?.attachments;
+    if (typeof raw === 'string') {
+        try {
+            raw = JSON.parse(raw);
+        } catch {
+            raw = [];
+        }
+    }
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .filter((a: any) => a && typeof a.url === 'string' && String(a.url).trim())
+        .map((a: any) => ({
+            url: String(a.url).trim(),
+            ...(a.filename ? { filename: String(a.filename).slice(0, 240) } : {}),
+            ...(a.mimeType ? { mimeType: String(a.mimeType).slice(0, 120) } : {}),
+        }));
+}
+
 class HomeworkController {
     /** POST /homework — teacher/admin creates homework */
     async create(req: AuthRequest, res: Response, next: NextFunction) {
@@ -18,6 +51,10 @@ class HomeworkController {
                 return next(new ErrorResponse('dueDate is invalid', 400));
             }
 
+            const cleanAttachments = parseAttachmentsBody(req.body);
+            const legacyUrl = attachmentUrl ? String(attachmentUrl).trim() : '';
+            const firstUrl = cleanAttachments[0]?.url || legacyUrl || undefined;
+
             const homework = await Homework.create({
                 schoolId: req.schoolId,
                 className,
@@ -27,9 +64,11 @@ class HomeworkController {
                 description,
                 ...(parsedDueDate ? { dueDate: parsedDueDate } : {}),
                 createdBy: req.user!._id,
-                attachmentUrl,
+                ...(cleanAttachments.length > 0 ? { attachments: cleanAttachments } : {}),
+                ...(firstUrl ? { attachmentUrl: firstUrl } : {}),
             });
-            return sendResponse(res, homework, 'Homework created', 201);
+            const obj = homework.toObject();
+            return sendResponse(res, normalizeHomeworkResponse(obj), 'Homework created', 201);
         } catch (error) {
             next(error);
         }
@@ -45,7 +84,12 @@ class HomeworkController {
                 .populate('createdBy', 'name')
                 .sort({ dueDate: 1 })
                 .lean();
-            return sendResponse(res, homework, 'Homework list', 200);
+            return sendResponse(
+                res,
+                homework.map((h) => normalizeHomeworkResponse(h)),
+                'Homework list',
+                200
+            );
         } catch (error) {
             next(error);
         }
@@ -64,7 +108,12 @@ class HomeworkController {
                 .populate('createdBy', 'name')
                 .sort({ dueDate: 1 })
                 .lean();
-            return sendResponse(res, homework, 'Homework for student', 200);
+            return sendResponse(
+                res,
+                homework.map((h) => normalizeHomeworkResponse(h)),
+                'Homework for student',
+                200
+            );
         } catch (error) {
             next(error);
         }

@@ -11,7 +11,15 @@ router.use(protect, multitenant);
 
 router.get(
     '/me',
-    authorize(UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER),
+    authorize(
+        UserRole.TEACHER,
+        UserRole.ACCOUNTANT,
+        UserRole.TRANSPORT_MANAGER,
+        UserRole.BUS_DRIVER,
+        UserRole.CONDUCTOR,
+        UserRole.CLEANING_STAFF,
+        UserRole.STAFF_OTHER
+    ),
     OtherPaymentController.listMine
 );
 

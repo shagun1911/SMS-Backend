@@ -49,6 +49,40 @@ class FeeService {
         return result;
     }
 
+    /**
+     * Annual rupee concession on recurring (monthly) fees only: fixed amount plus a percentage of
+     * (per-month total × session months). Capped at the annual recurring total. One-time fees are excluded.
+     */
+    private totalAnnualConcessionOnMonthly(student: any, annualRecurringTotal: number): number {
+        if (!annualRecurringTotal || annualRecurringTotal <= 0) return 0;
+        const flat = Math.max(0, Math.round(Number(student?.concessionAmount) || 0));
+        const pct = Math.min(100, Math.max(0, Number(student?.concessionPercent) || 0));
+        const fromPct = pct > 0 ? Math.round((annualRecurringTotal * pct) / 100) : 0;
+        return Math.min(annualRecurringTotal, flat + fromPct);
+    }
+
+    /** For receipt PDF row: total annual concession on monthly fees (flat + %), or undefined if none. */
+    private concessionAnnualDisplayForReceipt(student: any, feeStructure: any | null, session: any): number | undefined {
+        if (!feeStructure || !student || !session) return undefined;
+        const rawItems: Array<{ amount: number; type?: string }> =
+            feeStructure.components && feeStructure.components.length > 0
+                ? feeStructure.components
+                : (feeStructure.fees || []).map((f: any) => ({
+                      amount: f.amount,
+                      type: f.type,
+                  }));
+        let monthlyTotal = 0;
+        for (const item of rawItems) {
+            if (!item || typeof item.amount !== 'number') continue;
+            const t = (item.type || '').toString().toLowerCase();
+            if (t === 'monthly') monthlyTotal += item.amount;
+        }
+        const sessionMonthCount = this.getSessionYearMonths(session).length || 12;
+        const annualRecurring = monthlyTotal * sessionMonthCount;
+        const total = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
+        return total > 0 ? total : undefined;
+    }
+
     private async ensureStudentFeeLedgerForActiveSession(schoolId: string, student: any): Promise<void> {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) return;
@@ -77,19 +111,18 @@ class FeeService {
 
         const months = this.getSessionYearMonths(session);
 
-        // Apply student-level concession to monthly fee per month.
-        // concessionAmount reduces the total annual monthly bill; the saving is
-        // spread evenly across all session months.
-        const concession = Number((student as any).concessionAmount) || 0;
+        // Apply student-level concession to monthly fee only (flat + % of annual recurring; one-time excluded).
         const sessionMonthCount = months.length || 12;
+        const annualRecurring = monthlyTotal * sessionMonthCount;
+        const concession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
 
         // Important: don't use Math.round per-month here, because it can slightly change the
         // effective annual concession (e.g., 6000 turning into 5997) due to rounding drift.
         // Instead, distribute the remaining rupees across months so the TOTAL matches exactly.
         // Example: if annualMonthlyAfter = 5997 and months = 12 -> 9 months get +1.
         const annualMonthlyAfter = concession > 0 && monthlyTotal > 0
-            ? Math.max(0, (monthlyTotal * sessionMonthCount) - concession)
-            : (monthlyTotal * sessionMonthCount);
+            ? Math.max(0, annualRecurring - concession)
+            : annualRecurring;
 
         const annualMonthlyAfterInt = Math.round(annualMonthlyAfter);
         const basePerMonth = sessionMonthCount > 0
@@ -334,22 +367,33 @@ class FeeService {
 
         // Load fee components for itemized receipt
         let feeComponents: Array<{ name: string; amount: number }> | undefined;
+        let feeStructureForReceipt: any = null;
         if (student.class) {
-            const feeStructure = await FeeStructureRepository.findByClass(
+            feeStructureForReceipt = await FeeStructureRepository.findByClass(
                 schoolId,
                 session._id.toString(),
                 student.class
             );
-            if (feeStructure) {
-                const items = (feeStructure.components && feeStructure.components.length > 0)
-                    ? feeStructure.components
-                    : (feeStructure.fees || []).map((f: any) => ({ name: f.title || f.name, amount: f.amount, type: f.type }));
+            if (feeStructureForReceipt) {
+                const items =
+                    feeStructureForReceipt.components && feeStructureForReceipt.components.length > 0
+                        ? feeStructureForReceipt.components
+                        : (feeStructureForReceipt.fees || []).map((f: any) => ({
+                              name: f.title || f.name,
+                              amount: f.amount,
+                              type: f.type,
+                          }));
                 feeComponents = items.map((c: any) => ({
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * 12,
                 }));
             }
         }
+        const concessionAnnualDisplay = this.concessionAnnualDisplayForReceipt(
+            student,
+            feeStructureForReceipt,
+            session
+        );
 
         // Resolve which academic month this receipt was applied to by checking
         // the StudentFee ledger entries that contain this receiptNumber.
@@ -378,6 +422,7 @@ class FeeService {
             sessionYear: session.sessionYear,
             feeComponents,
             feeMonth,
+            concessionAnnualDisplay,
         });
 
         const receiptsDir = path.join(process.cwd(), 'receipts');
@@ -454,15 +499,16 @@ class FeeService {
 
                     // Apply student-level concession so the Collect Fee modal
                     // shows the correct per-month amount for this student.
-                    const studentConcession = Number((student as any).concessionAmount) || 0;
+                    const sessionMonthCount = session
+                        ? (this.getSessionYearMonths(session).length || 12)
+                        : 12;
+                    const annualRecurring = monthlyTotal * sessionMonthCount;
+                    const studentConcession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
                     let effectiveMonthlyFee = monthlyTotal;
                     if (studentConcession > 0 && monthlyTotal > 0) {
-                        const sessionMonthCount = session
-                            ? (this.getSessionYearMonths(session).length || 12)
-                            : 12;
                         effectiveMonthlyFee = Math.max(
                             0,
-                            Math.round(((monthlyTotal * sessionMonthCount) - studentConcession) / sessionMonthCount)
+                            Math.round((annualRecurring - studentConcession) / sessionMonthCount)
                         );
                     }
 
@@ -505,20 +551,28 @@ class FeeService {
 
         const session = await SessionRepository.findActive(schoolId);
         let feeComponents: Array<{ name: string; amount: number }> | undefined;
+        let feeStructureForReceipt: any = null;
         if (student.class && session) {
-            const feeStructure = await FeeStructureRepository.findByClass(
+            feeStructureForReceipt = await FeeStructureRepository.findByClass(
                 schoolId, session._id.toString(), student.class
             );
-            if (feeStructure) {
-                const rawItems = ((feeStructure.components ?? []).length > 0)
-                    ? (feeStructure.components ?? [])
-                    : (feeStructure.fees || []).map((f: any) => ({ name: f.title || f.name, amount: f.amount, type: f.type }));
+            if (feeStructureForReceipt) {
+                const rawItems = ((feeStructureForReceipt.components ?? []).length > 0)
+                    ? (feeStructureForReceipt.components ?? [])
+                    : (feeStructureForReceipt.fees || []).map((f: any) => ({
+                          name: f.title || f.name,
+                          amount: f.amount,
+                          type: f.type,
+                      }));
                 feeComponents = rawItems.map((c: any) => ({
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * 12,
                 }));
             }
         }
+        const concessionAnnualDisplay = session
+            ? this.concessionAnnualDisplayForReceipt(student, feeStructureForReceipt, session)
+            : undefined;
 
         // Determine academic month for this receipt by checking which StudentFee
         // ledger rows contain this receiptNumber. Pick the latest dueDate month.
@@ -548,6 +602,7 @@ class FeeService {
             sessionYear: session?.sessionYear,
             feeComponents,
             feeMonth,
+            concessionAnnualDisplay,
         });
     }
 
@@ -727,18 +782,27 @@ class FeeService {
     async processInitialDeposit(
         schoolId: string,
         student: any,
-        data: { initialDepositAmount: number; paymentMode?: string; depositDate?: Date; transactionId?: string; staffId: string; concessionAmount?: number }
+        data: {
+            initialDepositAmount: number;
+            paymentMode?: string;
+            depositDate?: Date;
+            transactionId?: string;
+            staffId: string;
+            concessionAmount?: number;
+            concessionPercent?: number;
+        }
     ): Promise<IFeePayment | null> {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) return null;
 
-        // Store concession on student before creating the ledger so that
-        // ensureStudentFeeLedgerForActiveSession can read it and apply adjusted per-month amounts.
-        const concession = Number(data.concessionAmount) || 0;
-        if (concession > 0) {
-            (student as any).concessionAmount = concession;
-            await StudentRepository.update(student._id.toString(), { concessionAmount: concession } as any);
-        }
+        const flatConcession = Math.max(0, Math.round(Number(data.concessionAmount) || 0));
+        const pctConcession = Math.min(100, Math.max(0, Number(data.concessionPercent) || 0));
+        (student as any).concessionAmount = flatConcession;
+        (student as any).concessionPercent = pctConcession;
+        await StudentRepository.update(student._id.toString(), {
+            concessionAmount: flatConcession,
+            concessionPercent: pctConcession,
+        } as any);
 
         // Ensure per-month ledger exists for this student in this session.
         // This allows advance payments (e.g. paid in March for April) to reduce April's pending/expected.
@@ -747,6 +811,7 @@ class FeeService {
         let totalYearly = student.totalYearlyFee ?? 0;
         let firstMonthFee = 0;
         let oneTimeTotalFromStructure = 0;
+        let structureForReceipt: any = null;
 
         // Derive yearly + first-month fee from fee structure when possible
         if (student.class) {
@@ -755,6 +820,7 @@ class FeeService {
                 session._id.toString(),
                 student.class
             );
+            structureForReceipt = structure;
             if (structure) {
                 // Prefer new components model (with type 'monthly' | 'one-time')
                 const rawItems: Array<{ amount: number; type?: string }> =
@@ -777,18 +843,17 @@ class FeeService {
                     }
                 }
 
-                // Apply concession: reduces total annual monthly bill; per-month amount was
-                // already baked into ledger entries via ensureStudentFeeLedgerForActiveSession.
+                // Apply concession on recurring fees only (flat + % of annual monthly total).
                 const sessionMonthCount = this.getSessionYearMonths(session).length || 12;
-                const adjustedMonthlyAnnual = concession > 0
-                    ? Math.max(0, monthlyTotal * sessionMonthCount - concession)
-                    : monthlyTotal * sessionMonthCount;
+                const annualRecurring = monthlyTotal * sessionMonthCount;
+                const concessionTotal = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
+                const adjustedMonthlyAnnual = Math.max(0, annualRecurring - concessionTotal);
 
                 // Annual = adjusted monthly total + all one-time components
                 const computedAnnual = adjustedMonthlyAnnual + oneTimeTotal;
                 if (!totalYearly || totalYearly <= 0) {
                     totalYearly = computedAnnual;
-                } else if (concession > 0) {
+                } else if (concessionTotal > 0) {
                     // Recalculate if concession was given, overriding any old value
                     totalYearly = computedAnnual;
                 }
@@ -841,7 +906,8 @@ class FeeService {
             depositPaymentMode: data.paymentMode,
             depositDate: paymentDate,
             depositTransactionId: data.transactionId,
-            ...(concession > 0 ? { concessionAmount: concession } : {}),
+            concessionAmount: flatConcession,
+            concessionPercent: pctConcession,
         } as any);
 
         // Allocate the deposit into the ledger:
@@ -926,16 +992,29 @@ class FeeService {
                 // ignore and fallback
             }
 
+            const concessionAnnualDisplay = this.concessionAnnualDisplayForReceipt(
+                { ...student, concessionAmount: flatConcession, concessionPercent: pctConcession },
+                structureForReceipt,
+                session
+            );
             const pdfBuffer = await generateReceiptPDF({
                 school,
                 payment,
-                student: { ...student, totalYearlyFee: totalYearly, paidAmount: initialAmount, dueAmount: remainingDue },
+                student: {
+                    ...student,
+                    totalYearlyFee: totalYearly,
+                    paidAmount: initialAmount,
+                    dueAmount: remainingDue,
+                    concessionAmount: flatConcession,
+                    concessionPercent: pctConcession,
+                },
                 totalAnnualFee: totalYearly,
                 previousPaid: 0,
                 thisPayment: initialAmount,
                 remainingDue,
                 sessionYear: session.sessionYear,
                 feeMonth,
+                concessionAnnualDisplay,
             });
             const receiptsDir = path.join(process.cwd(), 'receipts');
             if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });

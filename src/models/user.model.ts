@@ -53,6 +53,11 @@ const userSchema = new Schema<IUser, IUserModel>(
             enum: Object.values(UserRole),
             default: UserRole.TEACHER,
         },
+        staffRoleTitle: {
+            type: String,
+            trim: true,
+            maxlength: 120,
+        },
         photo: {
             type: String, // Cloudinary URL
             default: 'no-photo.jpg',

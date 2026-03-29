@@ -250,7 +250,17 @@ class SalaryService {
         const staff = await UserRepository.find({
             schoolId,
             isActive: true,
-            role: { $in: [UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER] },
+            role: {
+                $in: [
+                    UserRole.TEACHER,
+                    UserRole.ACCOUNTANT,
+                    UserRole.TRANSPORT_MANAGER,
+                    UserRole.BUS_DRIVER,
+                    UserRole.CONDUCTOR,
+                    UserRole.CLEANING_STAFF,
+                    UserRole.STAFF_OTHER,
+                ],
+            },
             ...(specificStaffId && { _id: specificStaffId })
         });
 

@@ -21,6 +21,8 @@ export interface ReceiptPDFOptions {
     feeMonth?: string;
     feeComponents?: Array<{ name: string; amount: number }>;
     concession?: number;
+    /** Total annual concession on monthly fees (flat + %), when known from fee structure + student. */
+    concessionAnnualDisplay?: number;
     lateFee?: number;
 }
 
@@ -49,14 +51,19 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
     const {
         school, payment, student,
         totalAnnualFee, thisPayment, remainingDue, previousPaid = 0,
-        sessionYear, feeMonth, feeComponents, concession = 0, lateFee = 0,
+        sessionYear, feeMonth, feeComponents, concession = 0, lateFee = 0, concessionAnnualDisplay,
     } = opts;
 
     // The student-level concession (typically applied at admission) is often already reflected
     // in `student.totalYearlyFee`. So we use it for the display row only, without impacting
-    // the current net-fee calculation.
-    const concessionDisplay = Number((student as any).concessionAmount) || 0;
-    const concessionValueForRow = concessionDisplay > 0 ? concessionDisplay : concession;
+    // the current net-fee calculation. Prefer combined flat + % on recurring fees when provided.
+    const flatOnly = Number((student as any).concessionAmount) || 0;
+    const concessionValueForRow =
+        concessionAnnualDisplay != null && concessionAnnualDisplay > 0
+            ? concessionAnnualDisplay
+            : flatOnly > 0
+              ? flatOnly
+              : concession;
 
     const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
     const chunks: Buffer[] = [];

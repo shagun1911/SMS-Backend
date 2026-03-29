@@ -82,10 +82,29 @@ class UserController {
             const schoolId = req.schoolId!;
             req.body.schoolId = schoolId;
 
-            // Check staff limit for ALL staff roles (teachers, accountants, transport managers, admins)
-            const isStaffRole = [UserRole.TEACHER, UserRole.ACCOUNTANT, UserRole.TRANSPORT_MANAGER, UserRole.SCHOOL_ADMIN].includes(req.body.role);
+            const staffRolesForLimit: UserRole[] = [
+                UserRole.TEACHER,
+                UserRole.ACCOUNTANT,
+                UserRole.TRANSPORT_MANAGER,
+                UserRole.SCHOOL_ADMIN,
+                UserRole.BUS_DRIVER,
+                UserRole.CONDUCTOR,
+                UserRole.CLEANING_STAFF,
+                UserRole.STAFF_OTHER,
+            ];
+            const isStaffRole = staffRolesForLimit.includes(req.body.role);
             if (isStaffRole) {
                 await checkTeacherLimit(schoolId);
+            }
+
+            if (req.body.role === UserRole.STAFF_OTHER) {
+                const title = String(req.body.staffRoleTitle || '').trim();
+                if (title.length < 2) {
+                    return next(new ErrorResponse('Please enter a specific role for "Other"', 400));
+                }
+                req.body.staffRoleTitle = title;
+            } else {
+                req.body.staffRoleTitle = undefined;
             }
 
             if (!req.body.password) {
@@ -126,7 +145,19 @@ class UserController {
                 return next(new ErrorResponse(`Not authorized to update this user`, 401));
             }
 
-            const allowed = ['name', 'email', 'phone', 'subject', 'qualification', 'joiningDate', 'baseSalary', 'photo', 'isActive', 'permissions'];
+            const allowed = [
+                'name',
+                'email',
+                'phone',
+                'subject',
+                'staffRoleTitle',
+                'qualification',
+                'joiningDate',
+                'baseSalary',
+                'photo',
+                'isActive',
+                'permissions',
+            ];
             const payload: any = {};
             allowed.forEach((key) => {
                 if (req.body[key] !== undefined) payload[key] = req.body[key];
