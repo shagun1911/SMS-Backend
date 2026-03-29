@@ -64,6 +64,20 @@ class CascadeDeleteService {
                     UserNotification.deleteMany({ schoolId, userId: staffId }).session(session),
                     Class.updateMany({ schoolId, classTeacherId: staffId }, { $unset: { classTeacherId: 1 } }).session(session),
                     Bus.updateMany({ schoolId, driverId: staffId }, { $unset: { driverId: 1 } }).session(session),
+                    Bus.updateMany(
+                        { schoolId, driverUserId: staffId },
+                        {
+                            $unset: { driverUserId: 1 },
+                            $set: { driverName: '', driverPhone: '' },
+                        }
+                    ).session(session),
+                    Bus.updateMany(
+                        { schoolId, conductorUserId: staffId },
+                        {
+                            $unset: { conductorUserId: 1 },
+                            $set: { conductorName: '', conductorPhone: '' },
+                        }
+                    ).session(session),
                     User.deleteOne({ _id: staffId, schoolId }).session(session),
                 ]);
             });

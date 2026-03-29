@@ -7,8 +7,12 @@ export interface IBus extends Document {
     routeName: string;
     capacity: number;
     driverId?: Schema.Types.ObjectId;
+    /** Staff (User) assigned as driver — used to enforce one bus per driver. */
+    driverUserId?: Schema.Types.ObjectId;
     driverName?: string;
     driverPhone?: string;
+    /** Staff (User) assigned as conductor. */
+    conductorUserId?: Schema.Types.ObjectId;
     conductorName?: string;
     conductorPhone?: string;
     isActive: boolean;
@@ -47,6 +51,10 @@ const busSchema = new Schema<IBus>(
             type: Schema.Types.ObjectId,
             ref: 'Driver',
         },
+        driverUserId: {
+            type: Schema.Types.ObjectId,
+            ref: 'User',
+        },
         driverName: {
             type: String,
             trim: true,
@@ -54,6 +62,10 @@ const busSchema = new Schema<IBus>(
         driverPhone: {
             type: String,
             trim: true,
+        },
+        conductorUserId: {
+            type: Schema.Types.ObjectId,
+            ref: 'User',
         },
         conductorName: {
             type: String,
