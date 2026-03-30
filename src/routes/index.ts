@@ -23,6 +23,8 @@ import paymentRoutes from './payment.routes';
 import notificationRoutes from './notification.routes';
 import announcementRoutes from './announcement.routes';
 import supportRoutes from './support.routes';
+import attendanceRoutes from './attendance.routes';
+import studentNotificationRoutes from './studentNotification.routes';
 
 const router = Router();
 
@@ -44,6 +46,8 @@ router.use('/transport', transportRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/sessions', sessionRoutes);
 router.use('/classes', classRoutes);
+router.use('/attendance', attendanceRoutes);
+router.use('/student-notifications', studentNotificationRoutes);
 router.use('/timetable', timetableRoutes);
 
 router.use('/ai', aiRoutes);
