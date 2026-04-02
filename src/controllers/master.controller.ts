@@ -21,33 +21,60 @@ export class MasterController {
             const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
+            // Keep dashboard stats scoped exactly like Schools page:
+            // only schools where School.isActive = true.
+            const activeSchools = await School.find({ isActive: true })
+                .select('_id createdAt')
+                .lean();
+            const activeSchoolIds = (activeSchools as any[]).map((s) => s._id);
+            const totalSchools = activeSchoolIds.length;
+            const newThisMonth = (activeSchools as any[]).filter((s: any) => {
+                const created = s?.createdAt ? new Date(s.createdAt) : null;
+                return created && created >= startOfThisMonth;
+            }).length;
+
+            if (activeSchoolIds.length === 0) {
+                return sendResponse(
+                    res,
+                    {
+                        totalSchools: 0,
+                        activeSchools: 0,
+                        expiredSchools: 0,
+                        revenue: 0,
+                        newThisMonth: 0,
+                        expiringSchools: [],
+                        mrrTrend: [],
+                    },
+                    'OK',
+                    200
+                );
+            }
+
             const [
-                totalSchools,
-                activeSubs,
                 expiredOrSuspendedCount,
                 plansWithCount,
-                newThisMonth,
                 expiringSubs,
                 allSubsForMrr,
             ] = await Promise.all([
-                School.countDocuments({ isActive: true }),
-                SchoolSubscription.countDocuments({ status: 'active', subscriptionEnd: { $gte: now } }),
-                SchoolSubscription.countDocuments({ $or: [{ status: 'expired' }, { status: 'suspended' }, { subscriptionEnd: { $lt: now } }] }),
+                SchoolSubscription.countDocuments({
+                    schoolId: { $in: activeSchoolIds },
+                    $or: [{ status: 'expired' }, { status: 'suspended' }, { subscriptionEnd: { $lt: now } }],
+                }),
                 SchoolSubscription.aggregate([
-                    { $match: { status: 'active', subscriptionEnd: { $gte: now } } },
+                    { $match: { schoolId: { $in: activeSchoolIds }, status: 'active', subscriptionEnd: { $gte: now } } },
                     { $group: { _id: '$planId', count: { $sum: 1 } } },
                     { $lookup: { from: 'plans', localField: '_id', foreignField: '_id', as: 'plan' } },
                     { $unwind: '$plan' },
                 ]),
-                School.countDocuments({ isActive: true, createdAt: { $gte: startOfThisMonth } }),
                 SchoolSubscription.find({
+                    schoolId: { $in: activeSchoolIds },
                     status: 'active',
                     subscriptionEnd: { $gte: now, $lte: in30Days },
                 })
                     .populate('planId', 'name')
                     .populate('schoolId', 'schoolName schoolCode')
                     .lean(),
-                SchoolSubscription.find({})
+                SchoolSubscription.find({ schoolId: { $in: activeSchoolIds } })
                     .populate('planId', 'priceMonthly')
                     .lean(),
             ]);
@@ -90,7 +117,8 @@ export class MasterController {
                 res,
                 {
                     totalSchools,
-                    activeSchools: activeSubs,
+                    // Active Schools card should match schools table scope/count.
+                    activeSchools: totalSchools,
                     expiredSchools: expiredOrSuspendedCount,
                     revenue,
                     newThisMonth,
@@ -453,7 +481,11 @@ export class MasterController {
     async getBillingOverview(_req: Request, res: Response, next: NextFunction) {
         try {
             const now = new Date();
+            const activeSchools = await School.find({ isActive: true }).select('_id').lean();
+            const activeSchoolIds = (activeSchools as any[]).map((s) => s._id);
+
             const activeSubs = await SchoolSubscription.find({
+                schoolId: { $in: activeSchoolIds },
                 status: 'active',
                 subscriptionEnd: { $gte: now },
             })
@@ -492,11 +524,12 @@ export class MasterController {
                 });
             });
 
-            const totalSchools = await School.countDocuments({ isActive: true });
+            const totalSchools = activeSchoolIds.length;
             const paidCount = activeSubs.length;
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
             const churnThisMonth = await SchoolSubscription.countDocuments({
+                schoolId: { $in: activeSchoolIds },
                 subscriptionEnd: { $gte: startOfMonth, $lte: endOfMonth },
             });
             const arpu = paidCount > 0 ? monthlyRevenue / paidCount : 0;

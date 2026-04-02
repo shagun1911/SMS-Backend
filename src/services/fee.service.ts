@@ -88,7 +88,14 @@ class FeeService {
         if (!session) return;
         if (!student?.class) return;
 
-        const structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
+        let structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
+        if (!structure && typeof student.class === 'string' && student.class.includes(' ')) {
+            structure = await FeeStructureRepository.findByClass(
+                schoolId,
+                session._id.toString(),
+                student.class.split(' ')[0]
+            );
+        }
         if (!structure) return;
 
         const rawItems: Array<{ title?: string; name?: string; amount: number; type?: string }> =
@@ -606,102 +613,153 @@ class FeeService {
         });
     }
 
-    async listFeePayments(schoolId: string, limit = 200, studentId?: string): Promise<IFeePayment[]> {
+    async listFeePayments(
+        schoolId: string,
+        limit = 200,
+        studentId?: string
+    ): Promise<Array<IFeePayment & { paymentDetail?: string; appliedMonths?: string[] }>> {
         const payments = studentId
             ? await FeePaymentRepository.findByStudent(schoolId, studentId)
             : await FeePaymentRepository.findPaymentsBySchool(schoolId, limit);
 
         // Hide payments for students that have been deleted (studentId failed to populate),
         // so receipts list does not show \"Unknown\" rows.
-        return payments.filter((p: any) => p.studentId);
+        const validPayments = payments.filter((p: any) => p.studentId);
+
+        const receiptNumbers = [...new Set(
+            validPayments
+                .map((p: any) => String((p as any)?.receiptNumber || '').trim())
+                .filter(Boolean)
+        )];
+
+        const receiptToMonths = new Map<string, string[]>();
+        if (receiptNumbers.length) {
+            const feeDocs = await StudentFee.find({
+                schoolId: new Types.ObjectId(schoolId),
+                'payments.receiptNumber': { $in: receiptNumbers },
+            })
+                .select('month payments.receiptNumber')
+                .lean();
+
+            for (const doc of feeDocs as any[]) {
+                const feeMonth = String(doc?.month || '').trim();
+                if (!feeMonth) continue;
+                for (const row of (doc?.payments || [])) {
+                    const rn = String(row?.receiptNumber || '').trim();
+                    if (!rn) continue;
+                    const arr = receiptToMonths.get(rn) || [];
+                    if (!arr.includes(feeMonth)) arr.push(feeMonth);
+                    receiptToMonths.set(rn, arr);
+                }
+            }
+        }
+
+        return validPayments.map((p: any) => {
+            const obj = p && typeof p.toObject === 'function' ? p.toObject() : p;
+            const rn = String(obj?.receiptNumber || '').trim();
+            const appliedMonths = [...new Set(rn ? (receiptToMonths.get(rn) || []) : [])];
+            let paymentDetail = 'Fee paid';
+            if (appliedMonths.length === 1) {
+                paymentDetail =
+                    appliedMonths[0] === 'One-Time'
+                        ? 'One-time fee paid'
+                        : `${appliedMonths[0]} fee paid`;
+            } else if (appliedMonths.length > 1) {
+                paymentDetail = `Fees paid (${appliedMonths.join(', ')})`;
+            }
+            return { ...obj, appliedMonths, paymentDetail };
+        });
     }
 
     async getDefaulters(schoolId: string): Promise<any[]> {
         const schoolObjId = new Types.ObjectId(schoolId);
         const today = new Date();
-        const currentYear = today.getFullYear();
-        const currentMonthIndex = today.getMonth(); // 0-based
+        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
 
-        const session = await SessionRepository.findActive(schoolId);
-        const structures = session ? await FeeStructureRepository.findBySession(schoolId, session._id.toString()) : [];
-        const classFeeParts = new Map<string, { monthlyTotal: number; oneTimeTotal: number }>();
-        for (const s of structures as any[]) {
-            const rawItems: Array<{ amount: number; type?: string }> =
-                (s.components && s.components.length > 0)
-                    ? s.components
-                    : (s.fees || []).map((f: any) => ({ amount: f.amount, type: f.type }));
-            let monthlyTotal = 0;
-            let oneTimeTotal = 0;
-            for (const item of rawItems) {
-                if (!item || typeof item.amount !== 'number') continue;
-                const t = (item.type || '').toString().toLowerCase();
-                if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
-                else if (t === 'monthly') monthlyTotal += item.amount;
-            }
-            if (s.class) classFeeParts.set(String(s.class), { monthlyTotal, oneTimeTotal });
-        }
-        const getPartsForClass = (cls?: string) => {
-            if (!cls) return null;
-            const direct = classFeeParts.get(cls);
-            if (direct) return direct;
-            if (typeof cls === 'string' && cls.includes(' ')) {
-                const first = classFeeParts.get(cls.split(' ')[0]);
-                if (first) return first;
-            }
-            return null;
-        };
-        const expectedFromParts = (parts: { monthlyTotal: number; oneTimeTotal: number } | null, totalYearly: number, monthsCount: number) => {
-            if (monthsCount <= 0) return 0;
-            if (parts && (parts.monthlyTotal > 0 || parts.oneTimeTotal > 0)) {
-                return Math.round(parts.oneTimeTotal + parts.monthlyTotal * monthsCount);
-            }
-            return Math.round((totalYearly / 12) * monthsCount);
-        };
+        const activeSession = await SessionRepository.findActive(schoolId);
+        if (!activeSession) return [];
 
-        const students = await Student.find({
+        // Ensure active-session monthly ledger exists so expected-till-last-month
+        // can be computed consistently for all active students.
+        const activeStudents = await Student.find({
             schoolId: schoolObjId,
             isActive: true,
-            totalYearlyFee: { $gt: 0 },
         })
+            .select('_id class admissionDate totalYearlyFee concessionAmount concessionPercent firstName lastName fatherName section admissionNumber paidAmount dueAmount')
             .sort({ class: 1, section: 1 })
             .lean();
-
-        const defaulters: any[] = [];
-
-        for (const s of students as any[]) {
-            const totalYearly: number = s.totalYearlyFee ?? 0;
-            const paidAmount: number = s.paidAmount ?? 0;
-            const admissionDate: Date | null = s.admissionDate ? new Date(s.admissionDate) : null;
-
-            const startYear = admissionDate ? admissionDate.getFullYear() : currentYear;
-            const startMonthIndex = admissionDate ? admissionDate.getMonth() : 0;
-
-            let monthDiff =
-                (currentYear - startYear) * 12 +
-                (currentMonthIndex - startMonthIndex) +
-                1;
-
-            if (monthDiff <= 0) continue;
-            if (monthDiff > 12) monthDiff = 12;
-
-            // Defaulters = unpaid for previous months (not current month)
-            const prevMonths = Math.max(0, monthDiff - 1);
-            if (prevMonths <= 0) continue;
-
-            const parts = getPartsForClass(s.class);
-            const expectedTillPrev = Math.min(totalYearly, expectedFromParts(parts, totalYearly, prevMonths));
-
-            if (paidAmount + 0.5 < expectedTillPrev) {
-                const shortfallTillPrev = expectedTillPrev - paidAmount;
-                defaulters.push({
-                    ...s,
-                    expectedTillPrev,
-                    shortfallTillPrev,
-                });
+        for (const s of activeStudents as any[]) {
+            if (!s?.class) continue;
+            try {
+                await this.ensureStudentFeeLedgerForActiveSession(schoolId, s);
+            } catch (_) {
+                // best effort
             }
         }
 
-        return defaulters;
+        // Previous-month arrears are based on monthly fee rows only
+        // (exclude One-Time from defaulter calculation).
+        const previousRows = await StudentFee.find({
+            schoolId: schoolObjId,
+            sessionId: activeSession._id,
+            dueDate: { $lt: currentMonthStart },
+            month: { $ne: 'One-Time' },
+        })
+            .select('studentId month dueDate totalAmount remainingAmount')
+            .lean();
+
+        const students = activeStudents as any[];
+
+        const studentMap = new Map<string, any>(students.map((s: any) => [String(s._id), s]));
+        const byStudent = new Map<string, {
+            expectedTillPrev: number;
+            paidTillPrev: number;
+            previousMonthDue: number;
+            unpaidMonths: string[];
+        }>();
+
+        for (const row of previousRows as any[]) {
+            const sid = String(row.studentId);
+            const student = studentMap.get(sid);
+            if (!student) continue;
+
+            const due = Math.max(0, Number(row.remainingAmount) || 0);
+            const total = Math.max(0, Number(row.totalAmount) || 0);
+
+            const existing = byStudent.get(sid) || {
+                expectedTillPrev: 0,
+                paidTillPrev: 0,
+                previousMonthDue: 0,
+                unpaidMonths: [],
+            };
+            existing.expectedTillPrev += total;
+            existing.paidTillPrev += Math.max(0, total - due);
+            existing.previousMonthDue += due;
+
+            const monthLabel = String(row.month || '').trim();
+            if (due > 0 && monthLabel && !existing.unpaidMonths.includes(monthLabel)) {
+                existing.unpaidMonths.push(monthLabel);
+            }
+
+            byStudent.set(sid, existing);
+        }
+
+        return students
+            .map((s: any) => {
+                const agg = byStudent.get(String(s._id));
+                if (!agg || agg.expectedTillPrev <= 0) return null;
+                const paidTillPrev = Math.max(0, agg.paidTillPrev);
+                const previousMonthDue = Math.max(0, agg.expectedTillPrev - paidTillPrev);
+                if (previousMonthDue <= 0) return null;
+                return {
+                    ...s,
+                    expectedTillPrev: Math.round(agg.expectedTillPrev),
+                    paidTillPrev: Math.round(paidTillPrev),
+                    previousMonthDue: Math.round(previousMonthDue),
+                    unpaidMonths: agg.unpaidMonths,
+                };
+            })
+            .filter(Boolean);
     }
 
     /**
@@ -1366,7 +1424,7 @@ class FeeService {
         month: number
     ): Promise<{
         stats: { totalCollected: number; totalExpected: number; totalPending: number; collectionRate: number; transactionCount: number };
-        payments: IFeePayment[];
+        payments: Array<IFeePayment & { paymentDetail?: string; appliedMonths?: string[] }>;
     }> {
         const session = await SessionRepository.findActive(schoolId);
         if (!session) throw new ErrorResponse('No active session found', 400);
@@ -1403,6 +1461,63 @@ class FeeService {
         const payments = rawPayments.filter((p: any) => p.studentId);
         const totalCollected = payments.reduce((sum: number, p: any) => sum + (Number(p.amountPaid) || 0), 0);
 
+        // Build a receipt -> applied month(s) map from StudentFee ledger.
+        // This lets UI show "One-Time fee paid" or "March fee paid".
+        const receiptNumbers = [...new Set(
+            payments
+                .map((p: any) => String(p.receiptNumber || '').trim())
+                .filter(Boolean)
+        )];
+
+        const receiptToMonths = new Map<string, string[]>();
+        if (receiptNumbers.length) {
+            const feeDocs = await StudentFee.find({
+                schoolId: new Types.ObjectId(schoolId),
+                'payments.receiptNumber': { $in: receiptNumbers },
+            })
+                .select('month payments.receiptNumber')
+                .lean();
+
+            for (const doc of feeDocs as any[]) {
+                const feeMonth = String(doc?.month || '').trim();
+                if (!feeMonth) continue;
+                const rows = Array.isArray(doc?.payments) ? doc.payments : [];
+                for (const row of rows) {
+                    const rn = String(row?.receiptNumber || '').trim();
+                    if (!rn) continue;
+                    const existing = receiptToMonths.get(rn) || [];
+                    if (!existing.includes(feeMonth)) existing.push(feeMonth);
+                    receiptToMonths.set(rn, existing);
+                }
+            }
+        }
+
+        const paymentsWithDetail = payments.map((p: any) => {
+            // Preserve all real document fields when enriching.
+            const paymentObj =
+                p && typeof p.toObject === 'function'
+                    ? p.toObject()
+                    : p;
+
+            const rn = String(paymentObj?.receiptNumber || '').trim();
+            const appliedMonths = rn ? (receiptToMonths.get(rn) || []) : [];
+            const uniqueMonths = [...new Set(appliedMonths)];
+            let paymentDetail = 'Fee paid';
+            if (uniqueMonths.length === 1) {
+                paymentDetail =
+                    uniqueMonths[0] === 'One-Time'
+                        ? 'One-time fee paid'
+                        : `${uniqueMonths[0]} fee paid`;
+            } else if (uniqueMonths.length > 1) {
+                paymentDetail = `Fees paid (${uniqueMonths.join(', ')})`;
+            }
+            return {
+                ...paymentObj,
+                appliedMonths: uniqueMonths,
+                paymentDetail,
+            };
+        });
+
         // "Expected (Month)" should mean what was still due for this academic month
         // at the start of the selected month. If a student prepaid this month earlier
         // (e.g. April paid in March), expected becomes 0 for April.
@@ -1435,7 +1550,7 @@ class FeeService {
                 collectionRate,
                 transactionCount: payments.length,
             },
-            payments,
+            payments: paymentsWithDetail,
         };
     }
 }

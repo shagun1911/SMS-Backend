@@ -8,6 +8,27 @@ import { Types } from 'mongoose';
 import UserNotification from '../models/userNotification.model';
 
 class SalaryService {
+    private getPayrollPeriodBounds(month: string, year: number): {
+        startOfMonthUtc: Date;
+        endOfMonthUtc: Date;
+    } {
+        const parsedYear = Number(year);
+        if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 9999) {
+            throw new ErrorResponse('Invalid payroll year', 400);
+        }
+
+        const monthIndex = new Date(`${month} 1, ${parsedYear}`).getMonth();
+        if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+            throw new ErrorResponse('Invalid payroll month', 400);
+        }
+
+        // UTC boundaries avoid local-time timezone drift in DB comparisons.
+        const startOfMonthUtc = new Date(Date.UTC(parsedYear, monthIndex, 1, 0, 0, 0, 0));
+        const endOfMonthUtc = new Date(Date.UTC(parsedYear, monthIndex + 1, 0, 23, 59, 59, 999));
+
+        return { startOfMonthUtc, endOfMonthUtc };
+    }
+
     private async buildMonthlySalaryComponents(
         schoolId: string,
         staffId: string,
@@ -33,16 +54,13 @@ class SalaryService {
         const allowances = [...(structure?.allowances || [])];
         const deductions = [...(structure?.deductions || [])];
 
-        const monthStart = new Date(year, new Date(`${month} 1, ${year}`).getMonth(), 1);
-        const monthEnd = new Date(monthStart);
-        monthEnd.setMonth(monthEnd.getMonth() + 1);
-        monthEnd.setDate(monthEnd.getDate() - 1);
+        const { startOfMonthUtc, endOfMonthUtc } = this.getPayrollPeriodBounds(month, year);
 
         const otherPayments = await OtherPaymentRepository.findByStaffAndDateRange(
             schoolId,
             staffId,
-            monthStart,
-            monthEnd
+            startOfMonthUtc,
+            endOfMonthUtc
         );
 
         for (const payment of otherPayments) {
@@ -94,16 +112,13 @@ class SalaryService {
 
         const enriched = await Promise.all(
             filtered.map(async (r: any) => {
-                const monthStart = new Date(r.year, new Date(`${r.month} 1, ${r.year}`).getMonth(), 1);
-                const monthEnd = new Date(monthStart);
-                monthEnd.setMonth(monthEnd.getMonth() + 1);
-                monthEnd.setDate(monthEnd.getDate() - 1);
+                const { startOfMonthUtc, endOfMonthUtc } = this.getPayrollPeriodBounds(r.month, r.year);
 
                 const settled = await OtherPaymentRepository.findSettledByStaffAndDateRange(
                     schoolId,
                     String(r.staffId?._id ?? r.staffId),
-                    monthStart,
-                    monthEnd
+                    startOfMonthUtc,
+                    endOfMonthUtc
                 );
 
                 const settledBonusTotal = settled
@@ -245,8 +260,11 @@ class SalaryService {
         month: string,
         year: number,
         specificStaffId?: string
-    ): Promise<{ created: number; updated: number; skipped: number }> {
-        // 1. Get Active Staff (Teachers, Accountants, etc.)
+    ): Promise<{ created: number; updated: number; skipped: number; includedStaffIds: string[] }> {
+        const { endOfMonthUtc } = this.getPayrollPeriodBounds(month, year);
+
+        // 1. Get payroll-eligible active staff at query level:
+        // joiningDate must be on/before payroll month end.
         const staff = await UserRepository.find({
             schoolId,
             isActive: true,
@@ -261,14 +279,18 @@ class SalaryService {
                     UserRole.STAFF_OTHER,
                 ],
             },
+            joiningDate: { $lte: endOfMonthUtc },
             ...(specificStaffId && { _id: specificStaffId })
         });
 
         let createdCount = 0;
         let updatedCount = 0;
         let skippedCount = 0;
+        const includedStaffIds: string[] = [];
 
         for (const user of staff) {
+            includedStaffIds.push(String(user._id));
+
             // Check if salary already generated
             const existing = await SalaryRepository.findOne({
                 schoolId,
@@ -330,7 +352,7 @@ class SalaryService {
             createdCount++;
         }
 
-        return { created: createdCount, updated: updatedCount, skipped: skippedCount };
+        return { created: createdCount, updated: updatedCount, skipped: skippedCount, includedStaffIds };
     }
 
     /**

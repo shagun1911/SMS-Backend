@@ -88,20 +88,28 @@ async function drawFrontCard(
     const textBlockX = x + M + LOGO_SZ + 8;
     const textBlockW = CARD_W - M * 2 - LOGO_SZ - 8;
 
-    // School name + session + address (below session)
+    // Header text order:
+    // 1) School name
+    // 2) Affiliated to CBSE
+    // 3) Address
+    // 4) Session
     const schoolName = school.schoolName || 'School Name';
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
-    doc.text(schoolName, textBlockX, y + 8, { width: textBlockW, align: 'center' });
+    doc.text(schoolName, textBlockX, y + 7, { width: textBlockW, align: 'center' });
 
-    if (sessionYear) {
-        doc.fontSize(7).font('Helvetica').fillColor('#bbdefb');
-        doc.text(`Session: ${sessionYear}`, textBlockX, y + 22, { width: textBlockW, align: 'center' });
-    }
+    const affiliationBoard = String((school as ISchool & { board?: string }).board || 'CBSE').trim();
+    doc.fontSize(6.5).font('Helvetica').fillColor('#bbdefb');
+    doc.text(`Affiliated to ${affiliationBoard}`, textBlockX, y + 20, { width: textBlockW, align: 'center' });
 
     const addrLine = formatSchoolAddress(school);
     if (addrLine) {
         doc.fontSize(5.5).font('Helvetica').fillColor('#e3f2fd');
-        doc.text(addrLine, textBlockX, y + 34, { width: textBlockW, align: 'center', lineGap: 1 });
+        doc.text(addrLine, textBlockX, y + 30, { width: textBlockW, align: 'center', lineGap: 1 });
+    }
+
+    if (sessionYear) {
+        doc.fontSize(7).font('Helvetica').fillColor('#bbdefb');
+        doc.text(`Session: ${sessionYear}`, textBlockX, y + 44, { width: textBlockW, align: 'center' });
     }
 
     // "IDENTITY CARD" banner (below blue header)

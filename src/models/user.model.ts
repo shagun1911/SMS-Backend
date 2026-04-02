@@ -111,6 +111,7 @@ const userSchema = new Schema<IUser, IUserModel>(
 
 // Indexes
 userSchema.index({ schoolId: 1, role: 1 }); // Essential for finding staff by role within a school
+userSchema.index({ schoolId: 1, isActive: 1, role: 1, joiningDate: 1 }); // Payroll eligibility scan
 
 // Encrypt password using bcrypt
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

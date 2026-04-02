@@ -206,6 +206,13 @@ class ExamController {
     async getReportCardPdf(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { studentId } = req.params;
+            const examIdsParam = String(req.query.examIds || '').trim();
+            const selectedExamIds = examIdsParam
+                ? examIdsParam
+                      .split(',')
+                      .map((x) => x.trim())
+                      .filter(Boolean)
+                : [];
             const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId, isActive: true });
             if (!student) return next(new ErrorResponse('Student not found', 404));
             const school = await School.findById(req.schoolId);
@@ -215,14 +222,22 @@ class ExamController {
             const allResults = await ExamResult.find({ schoolId: req.schoolId, studentId }).lean();
             if (!allResults.length) return next(new ErrorResponse('No exam results found for this student', 404));
 
-            const examIds = [...new Set(allResults.map(r => r.examId.toString()))];
+            const filteredResults =
+                selectedExamIds.length > 0
+                    ? allResults.filter((r) => selectedExamIds.includes(r.examId.toString()))
+                    : allResults;
+            if (!filteredResults.length) {
+                return next(new ErrorResponse('No exam results found for selected exams', 404));
+            }
+
+            const examIds = [...new Set(filteredResults.map(r => r.examId.toString()))];
             const exams = await Exam.find({ _id: { $in: examIds } }).lean();
             const examMap = new Map(exams.map(e => [e._id.toString(), e]));
 
             /** Per exam + class + section: rank by percentage (then total obtained) so each exam shows correct rank without running merit list */
             const cohortKey = (examId: string, cls: string, sec: string) => `${examId}::${cls}::${sec}`;
             const cohortKeys = new Map<string, { examId: string; class: string; section: string }>();
-            for (const r of allResults) {
+            for (const r of filteredResults) {
                 const eid = r.examId.toString();
                 const cls = String(r.class ?? '');
                 const sec = String(r.section ?? '');
@@ -251,7 +266,7 @@ class ExamController {
             );
 
             const sidStr = studentId.toString();
-            const examResults = allResults
+            const examResults = filteredResults
                 .map(r => {
                     const exam = examMap.get(r.examId.toString());
                     const ck = cohortKey(r.examId.toString(), String(r.class ?? ''), String(r.section ?? ''));
