@@ -37,7 +37,7 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         },
         lastName: {
             type: String,
-            required: [true, 'Last name is required'],
+            default: '',
             trim: true,
         },
         fatherName: {
@@ -182,7 +182,7 @@ studentSchema.index({ schoolId: 1, status: 1 });
 
 // Virtual for full name
 studentSchema.virtual('fullName').get(function (this: HydratedDocument<IStudent>) {
-    return `${this.firstName} ${this.lastName}`;
+    return [this.firstName, this.lastName].filter((p) => (p || '').trim()).join(' ');
 });
 
 // Hash password before save
