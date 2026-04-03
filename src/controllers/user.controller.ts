@@ -60,6 +60,18 @@ class UserController {
                 return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
             }
 
+            // Super admin without a scoped school sees all tenants (master console use-case).
+            if (req.user!.role === UserRole.SUPER_ADMIN && !req.schoolId) {
+                return res.status(200).json({
+                    success: true,
+                    data: user,
+                });
+            }
+
+            if (!req.schoolId) {
+                return next(new ErrorResponse('School context required', 403));
+            }
+
             // Ensure user belongs to the same school
             if (user.schoolId?.toString() !== req.schoolId) {
                 return next(new ErrorResponse(`Not authorized to access this user`, 401));
@@ -240,6 +252,10 @@ class UserController {
 
             if (user.schoolId?.toString() !== req.schoolId) {
                 return next(new ErrorResponse(`Not authorized to delete this user`, 401));
+            }
+
+            if (user.role === UserRole.SUPER_ADMIN) {
+                return next(new ErrorResponse('Cannot delete platform super admin', 403));
             }
 
             await CascadeDeleteService.deleteStaffCascade(req.schoolId!, req.params.id);

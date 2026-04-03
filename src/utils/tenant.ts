@@ -1,4 +1,5 @@
 import { FilterQuery } from 'mongoose';
+import ErrorResponse from './errorResponse';
 
 /**
  * Builds a Mongoose filter object based on the tenant context (schoolId).
@@ -32,4 +33,20 @@ export const getTenantFilter = <T>(
 export const injectTenantId = <T>(schoolId: string | undefined, data: T): T => {
     if (!schoolId) return data;
     return { ...data, schoolId };
+};
+
+/**
+ * Enforce that a loaded document's schoolId matches the request tenant.
+ * If req.schoolId is undefined (e.g. super admin global), this is a no-op — callers must still authorize role.
+ */
+export const assertSameTenant = (reqSchoolId: string | undefined, resourceSchoolId: unknown): void => {
+    if (!reqSchoolId) return;
+    const a = String(reqSchoolId);
+    const b =
+        resourceSchoolId != null && typeof (resourceSchoolId as { toString?: () => string }).toString === 'function'
+            ? String((resourceSchoolId as { toString: () => string }).toString())
+            : String(resourceSchoolId ?? '');
+    if (a !== b) {
+        throw new ErrorResponse('Cross-tenant access denied', 403);
+    }
 };

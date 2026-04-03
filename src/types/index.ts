@@ -267,6 +267,15 @@ export interface IFeeStructure extends Document {
     updatedAt: Date;
 }
 
+export interface IReceiptCounter extends Document {
+    _id: Types.ObjectId;
+    schoolId: Types.ObjectId;
+    year: number;
+    seq: number;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export interface IFeePayment extends Document {
     _id: Types.ObjectId;
     schoolId: Types.ObjectId;

@@ -65,7 +65,8 @@ const feePaymentSchema = new Schema<IFeePayment, IFeePaymentModel>(
     }
 );
 
-feePaymentSchema.index({ schoolId: 1, receiptNumber: 1 }, { unique: true });
+feePaymentSchema.index({ receiptNumber: 1 }, { unique: true });
+feePaymentSchema.index({ schoolId: 1, receiptNumber: 1 });
 feePaymentSchema.index({ schoolId: 1, studentId: 1 });
 feePaymentSchema.index({ schoolId: 1, paymentDate: 1 });
 

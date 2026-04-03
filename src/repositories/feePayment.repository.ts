@@ -1,6 +1,8 @@
 import { Types } from 'mongoose';
 import { IFeePayment } from '../types';
 import FeePayment from '../models/feePayment.model';
+import ReceiptCounter from '../models/receiptCounter.model';
+import SchoolRepository from './school.repository';
 import { BaseRepository } from './base.repository';
 
 class FeePaymentRepository extends BaseRepository<IFeePayment> {
@@ -54,14 +56,29 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
         return docs.reduce((sum: number, p: any) => sum + (p.amountPaid || 0), 0);
     }
 
+    /**
+     * Globally unique receipt id: `{SCHOOL_CODE}-{YEAR}-{SEQUENCE}` (sequence per school per calendar year).
+     * Allocated atomically via ReceiptCounter to avoid duplicates under concurrency.
+     */
     async getNextReceiptNumber(schoolId: string, yearPrefix: string): Promise<string> {
-        const pattern = new RegExp(`^SSMS-${yearPrefix}-(\\d+)$`);
-        const last = await this.model
-            .findOne({ schoolId: new Types.ObjectId(schoolId), receiptNumber: pattern })
-            .sort({ receiptNumber: -1 })
-            .exec();
-        const nextNum = last ? parseInt((last.receiptNumber as string).match(/\d+$/)?.[0] || '0', 10) + 1 : 1;
-        return `SSMS-${yearPrefix}-${String(nextNum).padStart(5, '0')}`;
+        const school = await SchoolRepository.findById(schoolId);
+        if (!school?.schoolCode) {
+            throw new Error('School not found or missing school code for receipt');
+        }
+        const year = parseInt(yearPrefix.trim(), 10);
+        if (!Number.isFinite(year)) {
+            throw new Error(`Invalid receipt year: ${yearPrefix}`);
+        }
+        const code = school.schoolCode.trim().toUpperCase();
+        const counter = await ReceiptCounter.findOneAndUpdate(
+            { schoolId: new Types.ObjectId(schoolId), year },
+            { $inc: { seq: 1 } },
+            { upsert: true, new: true }
+        ).exec();
+        if (!counter) {
+            throw new Error('Failed to allocate receipt sequence');
+        }
+        return `${code}-${year}-${String(counter.seq).padStart(6, '0')}`;
     }
 }
 
