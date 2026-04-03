@@ -115,6 +115,35 @@ async function timetablesFromSchoolGrid(schoolId: string, className: string, sec
     }));
 }
 
+/** Shared by staff GET /timetable and student GET /auth/student/timetable */
+async function fetchTimetablesWithSchoolGridFallback(
+    schoolId: string | undefined,
+    className: string | undefined,
+    section: string | undefined
+): Promise<any[]> {
+    if (!schoolId) return [];
+    const filter: any = { schoolId, isActive: true };
+    if (className) filter.className = className;
+    if (section) filter.section = section;
+
+    let timetables: any[] = await Timetable.find(filter)
+        .populate('slots.teacherId', 'name')
+        .sort({ dayOfWeek: 1 })
+        .lean();
+
+    const useGridFallback =
+        Boolean(className && section) &&
+        (!timetables || timetables.length === 0 || !legacyTimetableHasDisplayableSlots(timetables));
+
+    if (useGridFallback && className && section) {
+        const fromGrid = await timetablesFromSchoolGrid(schoolId, className, section);
+        if (fromGrid.length > 0) {
+            timetables = fromGrid;
+        }
+    }
+    return timetables;
+}
+
 function getTeacherConflicts(
     schoolId: string,
     dayOfWeek: number,
@@ -381,30 +410,32 @@ class TimetableController {
                     ? String(rawSection).trim().toUpperCase()
                     : undefined;
 
-            const filter: any = { schoolId: req.schoolId, isActive: true };
-            if (className) filter.className = className;
-            if (section) filter.section = section;
+            const timetables = await fetchTimetablesWithSchoolGridFallback(req.schoolId, className, section);
+            return sendResponse(res, timetables, 'Timetables retrieved', 200);
+        } catch (error) {
+            return next(error);
+        }
+    }
 
-            let timetables: any[] = await Timetable.find(filter)
-                .populate('slots.teacherId', 'name')
-                .sort({ dayOfWeek: 1 })
-                .lean();
+    /** Student app: timetable for logged-in student's class/section only (ignores query params). */
+    async getTimetablesForCurrentStudent(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const st = req.student;
+            if (!st) {
+                return next(new ErrorResponse('Not authorized', 403));
+            }
+            const schoolId = st.schoolId?.toString();
+            const className = String(st.class || '').trim();
+            const section =
+                st.section != null && String(st.section).trim() !== ''
+                    ? String(st.section).trim().toUpperCase()
+                    : 'A';
 
-            const useGridFallback =
-                className &&
-                section &&
-                req.schoolId &&
-                (!timetables ||
-                    timetables.length === 0 ||
-                    !legacyTimetableHasDisplayableSlots(timetables));
-
-            if (useGridFallback && req.schoolId && className && section) {
-                const fromGrid = await timetablesFromSchoolGrid(req.schoolId, className, section);
-                if (fromGrid.length > 0) {
-                    timetables = fromGrid;
-                }
+            if (!className) {
+                return sendResponse(res, [], 'Timetables retrieved', 200);
             }
 
+            const timetables = await fetchTimetablesWithSchoolGridFallback(schoolId, className, section);
             return sendResponse(res, timetables, 'Timetables retrieved', 200);
         } catch (error) {
             return next(error);
