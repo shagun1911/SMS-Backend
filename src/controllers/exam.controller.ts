@@ -472,9 +472,71 @@ class ExamController {
                 studentId: student._id,
             })
                 .populate('examId', 'title type startDate')
-                .sort({ createdAt: -1 })
                 .lean();
-            return sendResponse(res, results, 'Student results', 200);
+
+            const cohortKey = (examId: string, cls: string, sec: string) => `${examId}::${cls}::${sec}`;
+            const cohortKeys = new Map<string, { examId: string; class: string; section: string }>();
+            for (const r of results) {
+                const eid =
+                    (r.examId as any)?._id != null
+                        ? String((r.examId as any)._id)
+                        : String((r.examId as any) ?? '');
+                if (!eid) continue;
+                const cls = String(r.class ?? '');
+                const sec = String(r.section ?? '');
+                const ck = cohortKey(eid, cls, sec);
+                if (!cohortKeys.has(ck)) cohortKeys.set(ck, { examId: eid, class: cls, section: sec });
+            }
+
+            const rankByCohort = new Map<string, Map<string, number>>();
+            await Promise.all(
+                [...cohortKeys.values()].map(async (k) => {
+                    const cohort = await ExamResult.find({
+                        schoolId: student.schoolId,
+                        examId: k.examId,
+                        class: k.class,
+                        section: k.section,
+                    })
+                        .sort({ percentage: -1, totalObtained: -1 })
+                        .select('studentId')
+                        .lean();
+                    const m = new Map<string, number>();
+                    cohort.forEach((doc, i) => {
+                        const sid = (doc.studentId as any)?.toString?.() ?? String(doc.studentId);
+                        m.set(sid, i + 1);
+                    });
+                    rankByCohort.set(cohortKey(k.examId, k.class, k.section), m);
+                })
+            );
+
+            const sidStr = student._id.toString();
+            const enriched = results.map((r) => {
+                const eid =
+                    (r.examId as any)?._id != null
+                        ? String((r.examId as any)._id)
+                        : String((r.examId as any) ?? '');
+                const ck = cohortKey(eid, String(r.class ?? ''), String(r.section ?? ''));
+                const computed = rankByCohort.get(ck)?.get(sidStr);
+                const rank = computed ?? r.rank ?? undefined;
+                return { ...r, rank };
+            });
+
+            enriched.sort((a, b) => {
+                const da = (a.examId as any)?.startDate
+                    ? new Date((a.examId as any).startDate).getTime()
+                    : NaN;
+                const db = (b.examId as any)?.startDate
+                    ? new Date((b.examId as any).startDate).getTime()
+                    : NaN;
+                if (Number.isFinite(da) && Number.isFinite(db) && da !== db) return da - db;
+                if (Number.isFinite(da) && !Number.isFinite(db)) return -1;
+                if (!Number.isFinite(da) && Number.isFinite(db)) return 1;
+                return String((a.examId as any)?.title || '').localeCompare(
+                    String((b.examId as any)?.title || '')
+                );
+            });
+
+            return sendResponse(res, enriched, 'Student results', 200);
         } catch (error) {
             next(error);
         }
