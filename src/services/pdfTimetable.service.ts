@@ -330,7 +330,7 @@ export async function generateSchoolTimetablePDF(options: SchoolTimetablePDFOpti
     y += 14;
 
     const periodLabels = schoolColumnDefs;
-    const classColW = 56;
+    const classColW = 68; // class + section (e.g. 10-A, Nursery-B)
     const periodColW = (CONTENT_WIDTH - classColW) / Math.max(1, periodLabels.length);
     const cellH = 20;
     const headerH = 28;

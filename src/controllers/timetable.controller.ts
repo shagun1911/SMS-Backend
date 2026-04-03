@@ -77,13 +77,8 @@ async function timetablesFromSchoolGrid(schoolId: string, className: string, sec
             });
         }
     }
-    if (!row) {
-        const sameName = rows.filter(
-            (r: any) =>
-                normTimetableClassName(String(r.className ?? '')).toLowerCase() === cn.toLowerCase()
-        );
-        if (sameName.length === 1) row = sameName[0];
-    }
+
+    // Do not fall back to "any single row with this class name" — that shows section A's grid for section B.
 
     if (!row || !Array.isArray(row.cells)) return [];
 
@@ -341,13 +336,20 @@ class TimetableController {
             const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
                 .populate('rows.cells.teacherId', 'name')
                 .lean();
-            const rows = ((grid as any)?.rows || []).map((r: any) => ({
-                className: r.className,
-                cells: (r.cells || []).map((c: any) => {
-                    const cell = c || {};
-                    return { subject: cell.subject ?? '', teacherName: cell.teacherId?.name };
-                }),
-            }));
+            const rows = ((grid as any)?.rows || []).map((r: any) => {
+                const section =
+                    r.section != null && String(r.section).trim() !== ''
+                        ? String(r.section).trim().toUpperCase()
+                        : 'A';
+                const classLabel = `${r.className}-${section}`;
+                return {
+                    className: classLabel,
+                    cells: (r.cells || []).map((c: any) => {
+                        const cell = c || {};
+                        return { subject: cell.subject ?? '', teacherName: cell.teacherId?.name };
+                    }),
+                };
+            });
             const buffer = await generateSchoolTimetablePDF({
                 school,
                 sessionYear,
