@@ -6,6 +6,10 @@ import { AuthRequest, UserRole } from '../types';
 import { checkTeacherLimit } from '../services/planLimit.service';
 import { updateUsageForSchool } from '../services/usage.service';
 import CascadeDeleteService from '../services/cascadeDelete.service';
+import {
+    isMongoDuplicateUsernameError,
+    parseAndValidateStaffPhone,
+} from '../utils/staffPhone';
 
 class UserController {
     /**
@@ -109,6 +113,10 @@ class UserController {
                 await checkTeacherLimit(schoolId);
             }
 
+            if (req.body.role === UserRole.SUPER_ADMIN) {
+                return next(new ErrorResponse('Super admin accounts cannot be created from this route', 403));
+            }
+
             if (req.body.role === UserRole.STAFF_OTHER) {
                 const title = String(req.body.staffRoleTitle || '').trim();
                 if (title.length < 2) {
@@ -119,14 +127,38 @@ class UserController {
                 req.body.staffRoleTitle = undefined;
             }
 
+            const normalizedPhone = parseAndValidateStaffPhone(String(req.body.phone || ''));
+            req.body.phone = normalizedPhone;
+            req.body.username = normalizedPhone;
+
+            const emailRaw = req.body.email != null ? String(req.body.email).trim() : '';
+            if (emailRaw === '') {
+                delete req.body.email;
+            } else {
+                req.body.email = emailRaw.toLowerCase();
+            }
+
             if (!req.body.password) {
                 const firstName = (req.body.name || '').split(' ')[0].toLowerCase() || 'staff';
-                const phoneLast4 = (req.body.phone || '').slice(-4) || '1234';
+                const phoneLast4 = normalizedPhone.slice(-4) || '1234';
                 req.body.password = firstName + phoneLast4;
             }
             req.body.plainPassword = req.body.password;
 
-            const user = await User.create(req.body);
+            let user;
+            try {
+                user = await User.create(req.body);
+            } catch (err) {
+                if (isMongoDuplicateUsernameError(err)) {
+                    return next(
+                        new ErrorResponse(
+                            'This phone number is already registered for another staff user',
+                            409
+                        )
+                    );
+                }
+                throw err;
+            }
 
             if (isStaffRole) {
                 await updateUsageForSchool(schoolId);
@@ -178,11 +210,48 @@ class UserController {
                 payload.permissions = payload.permissions.filter((p: string) => typeof p === 'string');
             }
 
+            if (payload.email !== undefined) {
+                const er = String(payload.email || '').trim();
+                payload.email = er === '' ? undefined : er.toLowerCase();
+            }
+
+            if (payload.phone !== undefined) {
+                const normalizedPhone = parseAndValidateStaffPhone(String(payload.phone));
+                payload.phone = normalizedPhone;
+                payload.username = normalizedPhone;
+                const taken = await User.findOne({
+                    username: normalizedPhone,
+                    _id: { $ne: req.params.id },
+                })
+                    .select('_id')
+                    .lean();
+                if (taken) {
+                    return next(
+                        new ErrorResponse(
+                            'This phone number is already registered for another staff user',
+                            409
+                        )
+                    );
+                }
+            }
+
             const previousUser = user;
-            user = await User.findByIdAndUpdate(req.params.id, payload, {
-                new: true,
-                runValidators: true
-            });
+            try {
+                user = await User.findByIdAndUpdate(req.params.id, payload, {
+                    new: true,
+                    runValidators: true,
+                });
+            } catch (err) {
+                if (isMongoDuplicateUsernameError(err)) {
+                    return next(
+                        new ErrorResponse(
+                            'This phone number is already registered for another staff user',
+                            409
+                        )
+                    );
+                }
+                throw err;
+            }
 
             if (previousUser.role === UserRole.TEACHER || (user as any).role === UserRole.TEACHER) {
                 await updateUsageForSchool(req.schoolId!);

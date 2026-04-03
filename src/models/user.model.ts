@@ -5,8 +5,8 @@ import jwt from 'jsonwebtoken';
 import config from '../config';
 
 interface IUserModel extends Model<IUser> {
-    // Add static methods here if needed
     findByEmail(email: string): Promise<IUser | null>;
+    findByUsername(username: string): Promise<IUser | null>;
 }
 
 const userSchema = new Schema<IUser, IUserModel>(
@@ -23,16 +23,34 @@ const userSchema = new Schema<IUser, IUserModel>(
             required: [true, 'Please add a name'],
             trim: true,
         },
+        /** Required for super admin (master console). Optional for school staff (login uses username = phone). */
         email: {
             type: String,
-            required: [true, 'Please add an email'],
+            required: function (this: IUser) {
+                return this.role === UserRole.SUPER_ADMIN;
+            },
             unique: true,
+            sparse: true,
             lowercase: true,
             trim: true,
-            match: [
-                /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
-                'Please add a valid email',
-            ],
+            validate: {
+                validator: function (this: IUser, v: string) {
+                    if (this.role === UserRole.SUPER_ADMIN) {
+                        return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v || '');
+                    }
+                    if (v == null || v === '') return true;
+                    return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+                },
+                message: 'Please add a valid email',
+            },
+        },
+        /** School staff: normalized digits only; unique globally; login identifier. Super admin: omit. */
+        username: {
+            type: String,
+            trim: true,
+            sparse: true,
+            unique: true,
+            match: [/^\d{10,15}$/, 'Username must be 10–15 digits'],
         },
         password: {
             type: String,
@@ -47,6 +65,7 @@ const userSchema = new Schema<IUser, IUserModel>(
             type: String,
             required: [true, 'Please add a phone number'],
             trim: true,
+            match: [/^\d{10,15}$/, 'Phone must be stored as 10–15 digits (normalized)'],
         },
         role: {
             type: String,
@@ -149,6 +168,14 @@ userSchema.methods.getRefreshToken = function (): string {
     return jwt.sign({ id: this._id.toString() }, config.jwt.refreshSecret as jwt.Secret, {
         expiresIn: config.jwt.refreshExpire as jwt.SignOptions['expiresIn'],
     });
+};
+
+userSchema.statics.findByEmail = function (email: string) {
+    return this.findOne({ email: (email || '').trim().toLowerCase() }).select('+password').exec();
+};
+
+userSchema.statics.findByUsername = function (username: string) {
+    return this.findOne({ username: (username || '').trim() }).select('+password').exec();
 };
 
 const User = model<IUser, IUserModel>('User', userSchema);

@@ -6,6 +6,12 @@ import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
 import { getTenantFilter } from '../utils/tenant';
 import { updateUsageForSchool } from './usage.service';
+import {
+    buildStudentUsernameBase,
+    ensureUniqueStudentUsername,
+    isMongoDuplicateUsernameError,
+    normalizeFirstNameForUsername,
+} from '../utils/studentUsername';
 
 class StudentService {
     /**
@@ -34,38 +40,60 @@ class StudentService {
             defaultPassword = `${dd}${mm}${yyyy}`;
         }
 
-        // admissionNumber is already generated at line 25
+        const namePart = normalizeFirstNameForUsername(studentData.firstName || '');
+        if (!namePart) {
+            throw new ErrorResponse(
+                'First name must contain at least one letter or number for username generation',
+                400
+            );
+        }
 
-        let username = studentData.firstName?.trim().toLowerCase() || '';
+        const phoneDigits = (studentData.phone || '').replace(/\D/g, '');
+        if (phoneDigits.length === 0) {
+            throw new ErrorResponse(
+                'Phone number must contain at least one digit (used for login username)',
+                400
+            );
+        }
 
-        // Check for siblings (same name and DOB) in the same school
-        if (studentData.firstName && studentData.dateOfBirth) {
-            const hasSibling = await Student.findOne({
-                schoolId: school._id,
-                firstName: { $regex: new RegExp(`^${studentData.firstName.trim()}$`, 'i') },
-                dateOfBirth: studentData.dateOfBirth
-            });
+        const baseUsername = buildStudentUsernameBase(
+            studentData.firstName || '',
+            studentData.phone,
+            admissionNumber
+        );
 
-            if (hasSibling && studentData.phone) {
-                username += studentData.phone.slice(-4);
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 12; attempt++) {
+            const username = await ensureUniqueStudentUsername(baseUsername);
+            try {
+                const student = await StudentRepository.create({
+                    ...studentData,
+                    schoolId: school._id,
+                    sessionId: activeSession._id,
+                    admissionNumber,
+                    username,
+                    status: StudentStatus.ACTIVE,
+                    isActive: true,
+                    password: defaultPassword,
+                    plainPassword: defaultPassword,
+                    mustChangePassword: true,
+                } as any);
+
+                await updateUsageForSchool(schoolId);
+                return student;
+            } catch (err) {
+                lastError = err;
+                if (isMongoDuplicateUsernameError(err)) {
+                    await new Promise((r) => setImmediate(r));
+                    continue;
+                }
+                throw err;
             }
         }
 
-        const student = await StudentRepository.create({
-            ...studentData,
-            schoolId: school._id,
-            sessionId: activeSession._id,
-            admissionNumber,
-            username,
-            status: StudentStatus.ACTIVE,
-            isActive: true,
-            password: defaultPassword,
-            plainPassword: defaultPassword,
-            mustChangePassword: true,
-        } as any);
-
-        await updateUsageForSchool(schoolId);
-        return student;
+        throw lastError instanceof Error
+            ? lastError
+            : new ErrorResponse('Could not assign a unique username. Try again.', 409);
     }
 
     /**

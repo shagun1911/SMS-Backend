@@ -22,7 +22,10 @@ export interface IUser extends Document {
     _id: Types.ObjectId;
     schoolId?: Types.ObjectId;
     name: string;
-    email: string;
+    /** Required for super admin; optional for school staff (login uses `username` = phone). */
+    email?: string;
+    /** Normalized digits; unique globally; school staff login identifier. */
+    username?: string;
     password: string;
     plainPassword?: string;
     phone: string;

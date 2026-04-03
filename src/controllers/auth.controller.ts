@@ -10,26 +10,24 @@ class AuthController {
      */
     async register(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
-            const { name, email, password, role, schoolId } = req.body;
+            const { name, email, password, role, schoolId, phone } = req.body;
 
-            // Basic validation
-            if (!name || !email || !password || !role) {
-                return next(new ErrorResponse('Please provide all fields', 400));
+            if (!name || !email || !password || !role || !phone) {
+                return next(new ErrorResponse('Please provide name, email, password, role, and phone', 400));
             }
 
-            // Check if user already exists
             const existingUser = await User.findOne({ email });
             if (existingUser) {
                 return next(new ErrorResponse('Email already registered', 400));
             }
 
-            // Create user
             const result = await AuthService.register({
                 name,
                 email,
                 password,
                 role: role as UserRole,
-                schoolId, // Optional for super admin
+                schoolId,
+                phone,
             });
 
             res.status(201).json({
@@ -46,13 +44,16 @@ class AuthController {
      */
     async login(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
-            const { email, password, portal } = req.body;
+            const { password, portal } = req.body;
+            const identifier = String(
+                req.body.identifier ?? req.body.email ?? req.body.phone ?? ''
+            ).trim();
 
-            if (!email || !password) {
-                return next(new ErrorResponse('Please provide email and password', 400));
+            if (!identifier || !password) {
+                return next(new ErrorResponse('Please provide phone (or email) and password', 400));
             }
 
-            const { user, tokens } = await AuthService.login(email, password);
+            const { user, tokens } = await AuthService.login(identifier, password);
 
             // Role vs Portal Validation
             if (portal === 'master' && user.role !== UserRole.SUPER_ADMIN) {

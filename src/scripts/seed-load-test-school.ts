@@ -17,6 +17,7 @@ import Plan from '../models/plan.model';
 import SchoolSubscription from '../models/schoolSubscription.model';
 import { UserRole, Board, Gender, StudentStatus } from '../types';
 import { updateUsageForSchool } from '../services/usage.service';
+import { normalizeStaffPhone } from '../utils/staffPhone';
 import { Types } from 'mongoose';
 
 dotenv.config();
@@ -116,6 +117,7 @@ async function main() {
     console.log(`   ✅ Session created: ${sessionYear}`);
 
     // 4. Create School Admin
+    const loadAdminPhone = normalizeStaffPhone('+91 99999 00001');
     await User.create({
         _id: adminId,
         schoolId: school._id,
@@ -123,7 +125,8 @@ async function main() {
         email: 'admin@loadtest.ssms.com',
         password: 'LoadTest@123',
         plainPassword: 'LoadTest@123',
-        phone: '+91 99999 00001',
+        phone: loadAdminPhone,
+        username: loadAdminPhone,
         role: UserRole.SCHOOL_ADMIN,
         isActive: true,
     });
@@ -151,13 +154,16 @@ async function main() {
         const isFemale = i % 2 === 0;
         const firstName = pick(isFemale ? FIRST_NAMES_F : FIRST_NAMES_M);
         const lastName = pick(SURNAMES);
+        const phRaw = `+91 9${String(900000000 + i).padStart(9, '0')}`;
+        const phNorm = normalizeStaffPhone(phRaw);
         teacherDocs.push({
             schoolId: school._id,
             name: `${firstName} ${lastName}`,
             email: `teacher_loadtest_${num}@loadtest.ssms.com`,
             password: hashedPassword,
             plainPassword: 'LoadTest@123',
-            phone: `+91 9${String(900000000 + i).padStart(9, '0')}`,
+            phone: phNorm,
+            username: phNorm,
             role: UserRole.TEACHER,
             subject: ['Mathematics', 'Science', 'English', 'Hindi', 'Social Studies'][i % 5],
             isActive: true,

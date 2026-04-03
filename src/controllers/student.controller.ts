@@ -11,6 +11,7 @@ import { sendResponse } from '../utils/response';
 import ErrorResponse from '../utils/errorResponse';
 import { generateIdCardPDF } from '../services/pdfIdCard.service';
 import CascadeDeleteService from '../services/cascadeDelete.service';
+import { buildStudentUsernameBase, ensureUniqueStudentUsername } from '../utils/studentUsername';
 
 class StudentController {
     /**
@@ -232,22 +233,13 @@ class StudentController {
             (student as any).plainPassword = password;
             (student as any).mustChangePassword = true;
 
-            // Ensure username is set if missing (using firstName + phone suffix only on name/DOB collision)
             if (!(student as any).username) {
-                const firstName = (student as any).firstName.trim().toLowerCase();
-                const dateOfBirth = (student as any).dateOfBirth;
-
-                // Check if another student has SAME name and SAME DOB
-                const hasSibling = await Student.findOne({
-                    _id: { $ne: student._id },
-                    schoolId: student.schoolId,
-                    firstName: { $regex: new RegExp(`^${(student as any).firstName.trim()}$`, 'i') },
-                    dateOfBirth: dateOfBirth
-                });
-
-                (student as any).username = (hasSibling && (student as any).phone)
-                    ? firstName + (student as any).phone.slice(-4)
-                    : firstName;
+                const base = buildStudentUsernameBase(
+                    (student as any).firstName,
+                    (student as any).phone,
+                    (student as any).admissionNumber
+                );
+                (student as any).username = await ensureUniqueStudentUsername(base, (student as any)._id);
             }
 
             await (student as any).save({ validateBeforeSave: false });

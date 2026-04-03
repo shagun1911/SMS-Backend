@@ -8,7 +8,22 @@ class UserRepository extends BaseRepository<IUser> {
     }
 
     async findByEmail(email: string): Promise<IUser | null> {
-        return await this.model.findOne({ email }).select('+password').exec();
+        return await this.model.findOne({ email: email.trim().toLowerCase() }).select('+password').exec();
+    }
+
+    async findByUsername(username: string): Promise<IUser | null> {
+        return await this.model.findOne({ username: username.trim() }).select('+password').exec();
+    }
+
+    /** Login: match normalized digits on either field (username is canonical; phone covers legacy rows). */
+    async findByUsernameOrPhone(digits: string): Promise<IUser | null> {
+        const d = digits.trim();
+        return await this.model
+            .findOne({
+                $or: [{ username: d }, { phone: d }],
+            })
+            .select('+password')
+            .exec();
     }
 
     async findBySchool(schoolId: string, role?: UserRole): Promise<IUser[]> {

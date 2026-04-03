@@ -1,8 +1,14 @@
 import jwt from 'jsonwebtoken';
-import { IAuthTokens, IUser } from '../types';
+import { IAuthTokens, IUser, UserRole } from '../types';
 import UserRepository from '../repositories/user.repository';
 import ErrorResponse from '../utils/errorResponse';
 import config from '../config';
+import {
+    isValidStaffPhoneDigits,
+    isMongoDuplicateUsernameError,
+    normalizeStaffPhone,
+    parseAndValidateStaffPhone,
+} from '../utils/staffPhone';
 
 class AuthService {
     /**
@@ -14,7 +20,27 @@ class AuthService {
             throw new ErrorResponse('Email already registered', 400);
         }
 
-        const user = await UserRepository.create(userData);
+        if (userData.role === UserRole.SUPER_ADMIN) {
+            userData.phone = parseAndValidateStaffPhone(userData.phone || '');
+        } else if (userData.schoolId) {
+            const p = parseAndValidateStaffPhone(userData.phone || '');
+            userData.phone = p;
+            userData.username = p;
+            const taken = await UserRepository.findByUsername(p);
+            if (taken) {
+                throw new ErrorResponse('This phone number is already registered', 400);
+            }
+        }
+
+        let user: IUser;
+        try {
+            user = await UserRepository.create(userData);
+        } catch (err) {
+            if (isMongoDuplicateUsernameError(err)) {
+                throw new ErrorResponse('This phone number is already registered', 409);
+            }
+            throw err;
+        }
         const tokens = this.generateAuthTokens(user);
 
         // Store refresh token
@@ -24,26 +50,53 @@ class AuthService {
     }
 
     /**
-     * Login with email and password
+     * Login: school staff use normalized phone as username; super admin and legacy staff may use email.
      */
-    async login(email: string, password: string): Promise<{ user: IUser; tokens: IAuthTokens }> {
-        const normalizedEmail = (email || '').trim().toLowerCase();
-        const user = await UserRepository.findByEmail(normalizedEmail);
+    async login(identifier: string, password: string): Promise<{ user: IUser; tokens: IAuthTokens }> {
+        const trimmed = (identifier || '').trim();
+        if (!trimmed) {
+            throw new ErrorResponse('Invalid credentials', 401);
+        }
+
+        let user: IUser | null = null;
+
+        if (trimmed.includes('@')) {
+            user = await UserRepository.findByEmail(trimmed);
+        } else {
+            const phoneDigits = normalizeStaffPhone(trimmed);
+            if (isValidStaffPhoneDigits(phoneDigits)) {
+                user = await UserRepository.findByUsernameOrPhone(phoneDigits);
+            }
+            if (!user) {
+                user = await UserRepository.findByEmail(trimmed.toLowerCase());
+            }
+        }
+
         if (!user) {
             throw new ErrorResponse('Invalid credentials', 401);
         }
 
-        // Since we select('+password') in findByEmail, user has password field
+        const pwdTry = typeof password === 'string' ? password : String(password ?? '');
+        const pwdTrimmed = pwdTry.trim();
+
         let isMatch = false;
         try {
-            isMatch = await (user as any).matchPassword(password);
+            isMatch = await (user as any).matchPassword(pwdTry);
+            if (!isMatch && pwdTrimmed !== pwdTry && pwdTrimmed.length >= 6) {
+                isMatch = await (user as any).matchPassword(pwdTrimmed);
+            }
         } catch {
             // matchPassword can throw if stored value is not a valid bcrypt hash
         }
         // One-time fix: if DB has plain-text password (e.g. from manual insert), accept and re-hash
-        if (!isMatch && (user as any).password === password) {
+        if (!isMatch && (user as any).password === pwdTry) {
             (user as any).password = password;
             await (user as any).save(); // pre-save hook will hash it
+            isMatch = true;
+        }
+        if (!isMatch && pwdTrimmed !== pwdTry && (user as any).password === pwdTrimmed) {
+            (user as any).password = pwdTrimmed;
+            await (user as any).save();
             isMatch = true;
         }
         if (!isMatch) {

@@ -6,6 +6,7 @@ import Session from '../models/session.model';
 import Plan from '../models/plan.model';
 import { UserRole, SubscriptionPlan, Board, Gender, StudentStatus } from '../types';
 import { updateUsageForSchool } from '../services/usage.service';
+import { normalizeStaffPhone } from './staffPhone';
 
 /**
  * Seed initial administrative accounts and demo data if they don't exist
@@ -22,7 +23,7 @@ export const seedSystem = async () => {
                 name: 'SSMS Master Admin',
                 email: superAdminEmail,
                 password: process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@2026',
-                phone: '+91 00000 00000',
+                phone: normalizeStaffPhone(process.env.SUPER_ADMIN_PHONE || '+91 00000 00000'),
                 role: UserRole.SUPER_ADMIN,
                 isActive: true
             });
@@ -109,24 +110,28 @@ export const seedSystem = async () => {
             });
 
             // 6. Seed School Admin
+            const adminPhone = normalizeStaffPhone('+91 99999 88888');
             await User.create({
                 _id: adminId,
                 schoolId: school._id,
                 name: 'SPS Admin',
                 email: 'admin@sps.com',
                 password: 'Admin@123',
-                phone: '+91 99999 88888',
+                phone: adminPhone,
+                username: adminPhone,
                 role: UserRole.SCHOOL_ADMIN,
                 isActive: true
             });
 
             // 7. Seed Staff
+            const teacherPhone = normalizeStaffPhone('+91 77777 66666');
             await User.create({
                 schoolId: school._id,
                 name: 'Maya Sharma',
                 email: 'maya@sps.com',
                 password: 'Teacher@123',
-                phone: '+91 77777 66666',
+                phone: teacherPhone,
+                username: teacherPhone,
                 role: UserRole.TEACHER,
                 subject: 'Mathematics',
                 isActive: true

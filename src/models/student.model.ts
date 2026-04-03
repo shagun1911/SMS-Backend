@@ -173,8 +173,8 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
 // Indexes
 // Ensure unique admission number per school
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
-// Ensure unique username per school
-studentSchema.index({ schoolId: 1, username: 1 }, { unique: true, sparse: true });
+// Login identifier: unique across all schools (student auth resolves by username alone)
+studentSchema.index({ username: 1 }, { unique: true, sparse: true });
 // Optimize class/section queries
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 // Optimize active student queries

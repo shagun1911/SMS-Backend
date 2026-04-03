@@ -6,6 +6,7 @@ import { AuthRequest, StudentStatus } from '../types';
 import { sendResponse } from '../utils/response';
 import config from '../config';
 import jwt from 'jsonwebtoken';
+import { buildStudentUsernameBase, ensureUniqueStudentUsername } from '../utils/studentUsername';
 
 class StudentAuthController {
     /**
@@ -70,8 +71,14 @@ class StudentAuthController {
 
                     // Set the hashed password now so future logins go through bcrypt
                     student.password = dobPassword;
-                    // For legacy students, ensure they have a default username if missing
-                    if (!student.username) student.username = student.firstName;
+                    if (!student.username) {
+                        const base = buildStudentUsernameBase(
+                            student.firstName,
+                            student.phone,
+                            student.admissionNumber
+                        );
+                        student.username = await ensureUniqueStudentUsername(base, student._id);
+                    }
                     student.mustChangePassword = true;
                 } else {
                     return next(new ErrorResponse('Invalid credentials', 401));
@@ -149,12 +156,10 @@ class StudentAuthController {
             const student = await Student.findById(req.student!._id).select('+password');
             if (!student) return next(new ErrorResponse('Student not found', 404));
 
-            // Check if new username is already taken by someone else in the same school
             const normalizedUsername = newUsername.trim().toLowerCase();
             const existing = await Student.findOne({
                 username: normalizedUsername,
-                schoolId: student.schoolId,
-                _id: { $ne: student._id }
+                _id: { $ne: student._id },
             });
             if (existing) {
                 return next(new ErrorResponse('Username is already taken. Please choose another one.', 400));

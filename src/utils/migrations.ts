@@ -1,4 +1,5 @@
 import Student from '../models/student.model';
+import { buildStudentUsernameBase, ensureUniqueStudentUsername } from './studentUsername';
 
 /**
  * Migration: Populate missing usernames for students
@@ -15,22 +16,15 @@ export async function migrateStudentUsernames() {
         console.log(`📝 Checking ${allStudents.length} students for username/password consistency...`);
 
         let updatedCount = 0;
-        // For each student, check if they have a "sibling" (same name and DOB) in the same school
         for (const student of allStudents) {
             try {
                 let changed = false;
-                const firstNameLower = student.firstName.trim().toLowerCase();
-                const phoneSuffix = (student as any).phone ? (student as any).phone.slice(-4) : '';
-
-                // Check for OTHER students with SAME name and SAME DOB
-                const hasSibling = allStudents.some(s =>
-                    s._id.toString() !== student._id.toString() &&
-                    s.schoolId.toString() === student.schoolId.toString() &&
-                    s.firstName.trim().toLowerCase() === firstNameLower &&
-                    new Date(s.dateOfBirth).getTime() === new Date(student.dateOfBirth).getTime()
+                const base = buildStudentUsernameBase(
+                    student.firstName,
+                    (student as any).phone,
+                    student.admissionNumber
                 );
-
-                const targetUsername = hasSibling ? (firstNameLower + phoneSuffix) : firstNameLower;
+                const targetUsername = await ensureUniqueStudentUsername(base, student._id);
 
                 if (student.username !== targetUsername) {
                     student.username = targetUsername;

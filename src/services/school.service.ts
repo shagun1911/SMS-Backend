@@ -4,6 +4,7 @@ import Plan from '../models/plan.model';
 import SchoolSubscription from '../models/schoolSubscription.model';
 import { ISchool, IUser, UserRole, SubscriptionPlan } from '../types';
 import ErrorResponse from '../utils/errorResponse';
+import { parseAndValidateStaffPhone } from '../utils/staffPhone';
 
 
 class SchoolService {
@@ -24,10 +25,18 @@ class SchoolService {
                 throw new ErrorResponse('School with this name, code or email already exists', 400);
             }
 
-            // 2. Check if admin email exists
-            const existingUser = await User.findOne({ email: adminData.email }).session(session);
-            if (existingUser) {
-                throw new ErrorResponse('Admin email already registered', 400);
+            const normalizedAdminPhone = parseAndValidateStaffPhone(adminData.phone || '');
+            const phoneTaken = await User.findOne({ username: normalizedAdminPhone }).session(session);
+            if (phoneTaken) {
+                throw new ErrorResponse('This phone number is already registered to another account', 400);
+            }
+
+            const adminEmail = (adminData.email || '').trim().toLowerCase();
+            if (adminEmail) {
+                const existingUser = await User.findOne({ email: adminEmail }).session(session);
+                if (existingUser) {
+                    throw new ErrorResponse('Admin email already registered', 400);
+                }
             }
 
             // 3. Create School Placeholder (to get ID)
@@ -38,11 +47,14 @@ class SchoolService {
                 studentLimit: 50,
             });
 
-            // 4. Create School Admin User
+            // 4. Create School Admin User (login username = normalized phone)
             const admin = new User({
                 ...adminData,
                 schoolId: school._id,
                 role: UserRole.SCHOOL_ADMIN,
+                phone: normalizedAdminPhone,
+                username: normalizedAdminPhone,
+                email: adminEmail || undefined,
                 isActive: true,
             });
 
