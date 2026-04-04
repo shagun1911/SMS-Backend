@@ -21,7 +21,12 @@ class AuthService {
         }
 
         if (userData.role === UserRole.SUPER_ADMIN) {
-            userData.phone = parseAndValidateStaffPhone(userData.phone || '');
+            const raw = userData.phone;
+            if (raw != null && String(raw).trim() !== '') {
+                userData.phone = parseAndValidateStaffPhone(String(raw));
+            } else {
+                delete (userData as Partial<IUser>).phone;
+            }
         } else if (userData.schoolId) {
             const p = parseAndValidateStaffPhone(userData.phone || '');
             userData.phone = p;
@@ -50,17 +55,30 @@ class AuthService {
     }
 
     /**
-     * Login: school staff use normalized phone as username; super admin and legacy staff may use email.
+     * Login: Master + school web portals use email only. Mobile staff app (`portal` teacher) may use phone or email.
      */
-    async login(identifier: string, password: string): Promise<{ user: IUser; tokens: IAuthTokens }> {
+    async login(
+        identifier: string,
+        password: string,
+        portal?: string
+    ): Promise<{ user: IUser; tokens: IAuthTokens }> {
         const trimmed = (identifier || '').trim();
         if (!trimmed) {
             throw new ErrorResponse('Invalid credentials', 401);
         }
 
+        const emailOnlyPortal = portal === 'master' || portal === 'school';
         let user: IUser | null = null;
 
-        if (trimmed.includes('@')) {
+        if (emailOnlyPortal) {
+            if (!trimmed.includes('@')) {
+                throw new ErrorResponse(
+                    'Sign in with your registered email address and password',
+                    400
+                );
+            }
+            user = await UserRepository.findByEmail(trimmed);
+        } else if (trimmed.includes('@')) {
             user = await UserRepository.findByEmail(trimmed);
         } else {
             const phoneDigits = normalizeStaffPhone(trimmed);
@@ -108,9 +126,10 @@ class AuthService {
         // Rotate refresh token
         await UserRepository.updateRefreshToken(user._id.toString(), tokens.refreshToken);
 
-        // Update last login
-        user.lastLogin = new Date();
-        await user.save();
+        // Avoid full document save() here — legacy super-admin rows may have empty/invalid phone;
+        // lastLogin update does not need to re-run validators on the whole user.
+        await UserRepository.updateLastLogin(user._id.toString());
+        (user as IUser).lastLogin = new Date();
 
         return { user, tokens };
     }

@@ -51,6 +51,7 @@ app.use(
         credentials: true,
     })
 );
+// app.use(cors({ origin: "*" }));
 
 // Razorpay webhook – must use raw body for signature verification (before express.json)
 app.use(

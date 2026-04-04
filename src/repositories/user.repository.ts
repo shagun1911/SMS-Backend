@@ -38,6 +38,10 @@ class UserRepository extends BaseRepository<IUser> {
         await this.model.findByIdAndUpdate(userId, { refreshToken }).exec();
     }
 
+    async updateLastLogin(userId: string): Promise<void> {
+        await this.model.findByIdAndUpdate(userId, { lastLogin: new Date() }).exec();
+    }
+
     async clearRefreshToken(userId: string): Promise<void> {
         await this.model.findByIdAndUpdate(userId, { refreshToken: null }).exec();
     }

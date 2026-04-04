@@ -7,7 +7,7 @@ class UserNotificationController {
     /** GET /api/v1/user-notifications */
     async getMyNotifications(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const userId = req.user?.id;
+            const userId = req.user?._id;
             if (!userId) {
                 throw new ErrorResponse('User not authenticated', 401);
             }
@@ -30,7 +30,7 @@ class UserNotificationController {
     /** PATCH /api/v1/user-notifications/:id/read */
     async markAsRead(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const userId = req.user?.id;
+            const userId = req.user?._id;
             if (!userId) throw new ErrorResponse('Not authenticated', 401);
 
             const notification = await UserNotification.findOneAndUpdate(
@@ -52,7 +52,7 @@ class UserNotificationController {
     /** PATCH /api/v1/user-notifications/read-all */
     async markAllAsRead(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const userId = req.user?.id;
+            const userId = req.user?._id;
             if (!userId) throw new ErrorResponse('Not authenticated', 401);
 
             const query: any = { userId, isRead: false };

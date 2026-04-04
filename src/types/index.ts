@@ -28,7 +28,8 @@ export interface IUser extends Document {
     username?: string;
     password: string;
     plainPassword?: string;
-    phone: string;
+    /** Required for school staff; optional for super admin (email-only master login). */
+    phone?: string;
     role: UserRole;
     photo?: string;
     /** When `role` is `staff_other`, label shown in directory and payroll. */

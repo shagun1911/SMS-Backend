@@ -12,8 +12,11 @@ class AuthController {
         try {
             const { name, email, password, role, schoolId, phone } = req.body;
 
-            if (!name || !email || !password || !role || !phone) {
-                return next(new ErrorResponse('Please provide name, email, password, role, and phone', 400));
+            if (!name || !email || !password || !role) {
+                return next(new ErrorResponse('Please provide name, email, password, and role', 400));
+            }
+            if (role !== UserRole.SUPER_ADMIN && !phone) {
+                return next(new ErrorResponse('Please provide phone for school staff accounts', 400));
             }
 
             const existingUser = await User.findOne({ email });
@@ -50,10 +53,14 @@ class AuthController {
             ).trim();
 
             if (!identifier || !password) {
-                return next(new ErrorResponse('Please provide phone (or email) and password', 400));
+                const msg =
+                    portal === 'master' || portal === 'school'
+                        ? 'Please provide email and password'
+                        : 'Please provide phone or email and password';
+                return next(new ErrorResponse(msg, 400));
             }
 
-            const { user, tokens } = await AuthService.login(identifier, password);
+            const { user, tokens } = await AuthService.login(identifier, password, portal);
 
             // Role vs Portal Validation
             if (portal === 'master' && user.role !== UserRole.SUPER_ADMIN) {

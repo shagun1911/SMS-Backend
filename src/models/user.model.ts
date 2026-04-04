@@ -63,9 +63,23 @@ const userSchema = new Schema<IUser, IUserModel>(
         },
         phone: {
             type: String,
-            required: [true, 'Please add a phone number'],
             trim: true,
-            match: [/^\d{10,15}$/, 'Phone must be stored as 10–15 digits (normalized)'],
+            /** Master console users sign in with email only; phone is optional for them. */
+            required: function (this: IUser) {
+                return this.role !== UserRole.SUPER_ADMIN;
+            },
+            validate: {
+                validator: function (this: IUser, v: unknown) {
+                    const s = v == null ? '' : String(v).trim();
+                    if (this.role === UserRole.SUPER_ADMIN) {
+                        if (!s) return true;
+                        return /^\d{10,15}$/.test(s);
+                    }
+                    if (!s) return false;
+                    return /^\d{10,15}$/.test(s);
+                },
+                message: 'Phone must be stored as 10–15 digits (normalized)',
+            },
         },
         role: {
             type: String,
