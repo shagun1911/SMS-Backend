@@ -71,11 +71,17 @@ class AuthController {
                 return next(new ErrorResponse('Unauthorized: Master Admins must use the Control Center', 403));
             }
 
+            if (portal === 'teacher' && user.role !== UserRole.TEACHER) {
+                return next(
+                    new ErrorResponse('This mobile login is for teachers only. Use the correct app or portal.', 403)
+                );
+            }
+
             // Determine redirect path based on role/portal
             let redirectTo = '/school/dashboard';
             if (user.role === UserRole.SUPER_ADMIN) {
                 redirectTo = '/master/dashboard';
-            } else if (user.role === UserRole.TEACHER || portal === 'teacher') {
+            } else if (user.role === UserRole.TEACHER) {
                 redirectTo = '/teacher/dashboard';
             }
 

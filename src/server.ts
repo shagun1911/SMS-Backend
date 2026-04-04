@@ -36,7 +36,7 @@ app.use(helmet({
     contentSecurityPolicy: false,
 }));
 
-// CORS – allow configured origins plus *.vercel.app for Vercel deployments
+//CORS – allow configured origins plus *.vercel.app for Vercel deployments
 app.use(
     cors({
         origin: (config.frontend as any).origins?.length
@@ -51,7 +51,7 @@ app.use(
         credentials: true,
     })
 );
-// app.use(cors({ origin: "*" }));
+ //app.use(cors({ origin: "*" }));
 
 // Razorpay webhook – must use raw body for signature verification (before express.json)
 app.use(
