@@ -54,7 +54,7 @@ class AuthController {
 
             if (!identifier || !password) {
                 const msg =
-                    portal === 'master' || portal === 'school'
+                    portal === 'master' || portal === 'school' || portal === 'transport'
                         ? 'Please provide email and password'
                         : 'Please provide phone or email and password';
                 return next(new ErrorResponse(msg, 400));
@@ -74,6 +74,15 @@ class AuthController {
             if (portal === 'teacher' && user.role !== UserRole.TEACHER) {
                 return next(
                     new ErrorResponse('This mobile login is for teachers only. Use the correct app or portal.', 403)
+                );
+            }
+
+            if (portal === 'transport' && user.role !== UserRole.TRANSPORT_MANAGER) {
+                return next(
+                    new ErrorResponse(
+                        'This login is for transport managers only. Use the correct app or portal.',
+                        403
+                    )
                 );
             }
 

@@ -67,7 +67,7 @@ class AuthService {
             throw new ErrorResponse('Invalid credentials', 401);
         }
 
-        const emailOnlyPortal = portal === 'master' || portal === 'school';
+        const emailOnlyPortal = portal === 'master' || portal === 'school' || portal === 'transport';
         let user: IUser | null = null;
 
         if (emailOnlyPortal) {
