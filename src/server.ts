@@ -1,4 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -16,6 +18,8 @@ import errorHandler from './middleware/error.middleware';
 import { seedSystem } from './utils/seeder';
 import { migrateStudentUsernames } from './utils/migrations';
 import * as paymentController from './controllers/payment.controller';
+import { setSocketIOServer } from './lib/socketIoRegistry';
+import { attachBusTrackingSocket } from './sockets/busTracking.socket';
 
 // Load env vars
 dotenv.config();
@@ -144,8 +148,24 @@ app.use(errorHandler);
 
 const PORT = config.port || 5000;
 
+const httpServer = http.createServer(app);
+
+const io = new Server(httpServer, {
+    path: '/socket.io',
+    cors: {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST'],
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+});
+
+setSocketIOServer(io);
+attachBusTrackingSocket(io);
+
 // Bind to 0.0.0.0 so the service is reachable on Render's assigned PORT
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = httpServer.listen(PORT, '0.0.0.0', () => {
     const geminiStatus = config.gemini?.apiKey ? 'configured' : 'not set';
     console.log(`
   ╔═══════════════════════════════════════════════════════╗
@@ -155,6 +175,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   ║   🌍 Environment: ${config.env}                    ║
   ║   📡 Port: ${PORT}                                   ║
   ║   🔗 API: http://localhost:${PORT}/api/v1              ║
+  ║   🔌 Socket.IO: same host, path /socket.io           ║
   ║   🤖 Gemini: ${geminiStatus.padEnd(10)}                       ║
   ║                                                       ║
   ╚═══════════════════════════════════════════════════════╝

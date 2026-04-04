@@ -1,6 +1,8 @@
 import { Router } from 'express';
-import { protect } from '../middleware/auth.middleware';
+import { protect, authorize } from '../middleware/auth.middleware';
 import AuthController from '../controllers/auth.controller';
+import BusLocationController from '../controllers/busLocation.controller';
+import { UserRole } from '../types';
 
 const router = Router();
 
@@ -11,5 +13,18 @@ router.get('/logout', protect, AuthController.logout);
 router.post('/change-password', protect, AuthController.changePassword);
 router.post('/verify-password', protect, AuthController.verifyPassword);
 router.post('/refresh-token', AuthController.refreshToken);
+
+router.get(
+    '/crew/bus-assignment',
+    protect,
+    authorize(UserRole.BUS_DRIVER, UserRole.CONDUCTOR),
+    BusLocationController.getCrewBusAssignment
+);
+router.post(
+    '/crew/bus-location',
+    protect,
+    authorize(UserRole.BUS_DRIVER, UserRole.CONDUCTOR),
+    BusLocationController.postCrewLocation
+);
 
 export default router;

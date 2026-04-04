@@ -97,6 +97,21 @@ class AuthController {
                 }
             }
 
+            if (portal === 'support_staff') {
+                if (
+                    user.role !== UserRole.ACCOUNTANT &&
+                    user.role !== UserRole.CLEANING_STAFF &&
+                    user.role !== UserRole.STAFF_OTHER
+                ) {
+                    return next(
+                        new ErrorResponse(
+                            'This login is for accountant, cleaning staff, and other school roles only. Use the correct app or portal.',
+                            403
+                        )
+                    );
+                }
+            }
+
             // Determine redirect path based on role/portal
             let redirectTo = '/school/dashboard';
             if (user.role === UserRole.SUPER_ADMIN) {

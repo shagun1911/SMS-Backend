@@ -131,7 +131,12 @@ class StudentAuthController {
      */
     async getMe(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const student = await Student.findById(req.student!._id).populate('schoolId', 'schoolName schoolCode logo');
+            const student = await Student.findById(req.student!._id)
+                .populate('schoolId', 'schoolName schoolCode logo')
+                .populate(
+                    'busId',
+                    'busNumber registrationNumber routeName driverName driverPhone conductorName conductorPhone isActive'
+                );
             if (!student) return next(new ErrorResponse('Student not found', 404));
             return sendResponse(res, student, 'Student profile', 200);
         } catch (error) {
