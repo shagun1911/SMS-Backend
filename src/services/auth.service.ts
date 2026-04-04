@@ -55,7 +55,8 @@ class AuthService {
     }
 
     /**
-     * Login: Master + school web portals use email only. Mobile staff app (`portal` teacher) may use phone or email.
+     * Login: Master + school web portals use email only.
+     * Mobile staff (`portal` teacher | transport): phone (username) or email, same as admin “Login (mobile)” credentials.
      */
     async login(
         identifier: string,
@@ -67,7 +68,7 @@ class AuthService {
             throw new ErrorResponse('Invalid credentials', 401);
         }
 
-        const emailOnlyPortal = portal === 'master' || portal === 'school' || portal === 'transport';
+        const emailOnlyPortal = portal === 'master' || portal === 'school';
         let user: IUser | null = null;
 
         if (emailOnlyPortal) {

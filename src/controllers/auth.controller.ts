@@ -54,7 +54,7 @@ class AuthController {
 
             if (!identifier || !password) {
                 const msg =
-                    portal === 'master' || portal === 'school' || portal === 'transport'
+                    portal === 'master' || portal === 'school'
                         ? 'Please provide email and password'
                         : 'Please provide phone or email and password';
                 return next(new ErrorResponse(msg, 400));
