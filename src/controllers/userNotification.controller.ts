@@ -17,6 +17,11 @@ class UserNotificationController {
                 query.schoolId = req.user.schoolId;
             }
 
+            const typeQ = typeof req.query.type === 'string' ? req.query.type.trim() : '';
+            if (typeQ) {
+                query.type = typeQ;
+            }
+
             const notifications = await UserNotification.find(query)
                 .sort({ createdAt: -1 })
                 .limit(50);
@@ -58,6 +63,11 @@ class UserNotificationController {
             const query: any = { userId, isRead: false };
             if (req.user?.schoolId) {
                 query.schoolId = req.user.schoolId;
+            }
+
+            const typeQ = typeof req.query.type === 'string' ? req.query.type.trim() : '';
+            if (typeQ) {
+                query.type = typeQ;
             }
 
             await UserNotification.updateMany(query, { isRead: true });

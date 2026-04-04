@@ -86,6 +86,17 @@ class AuthController {
                 );
             }
 
+            if (portal === 'crew') {
+                if (user.role !== UserRole.BUS_DRIVER && user.role !== UserRole.CONDUCTOR) {
+                    return next(
+                        new ErrorResponse(
+                            'This login is for bus drivers and conductors only. Use the correct app or portal.',
+                            403
+                        )
+                    );
+                }
+            }
+
             // Determine redirect path based on role/portal
             let redirectTo = '/school/dashboard';
             if (user.role === UserRole.SUPER_ADMIN) {
