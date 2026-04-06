@@ -23,11 +23,13 @@ const userSchema = new Schema<IUser, IUserModel>(
             required: [true, 'Please add a name'],
             trim: true,
         },
-        /** Required for super admin (master console). Optional for school staff (login uses username = phone). */
+        /** Required for super admin and school admin; optional for other school staff (login may use phone). */
         email: {
             type: String,
             required: function (this: IUser) {
-                return this.role === UserRole.SUPER_ADMIN;
+                return (
+                    this.role === UserRole.SUPER_ADMIN || this.role === UserRole.SCHOOL_ADMIN
+                );
             },
             unique: true,
             sparse: true,
@@ -35,7 +37,10 @@ const userSchema = new Schema<IUser, IUserModel>(
             trim: true,
             validate: {
                 validator: function (this: IUser, v: string) {
-                    if (this.role === UserRole.SUPER_ADMIN) {
+                    if (
+                        this.role === UserRole.SUPER_ADMIN ||
+                        this.role === UserRole.SCHOOL_ADMIN
+                    ) {
                         return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v || '');
                     }
                     if (v == null || v === '') return true;
@@ -64,7 +69,7 @@ const userSchema = new Schema<IUser, IUserModel>(
         phone: {
             type: String,
             trim: true,
-            /** Master console users sign in with email only; phone is optional for them. */
+            /** Master console: optional. School staff (including school admin): required as 10–15 digits. */
             required: function (this: IUser) {
                 return this.role !== UserRole.SUPER_ADMIN;
             },

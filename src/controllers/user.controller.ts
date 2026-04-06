@@ -117,6 +117,30 @@ class UserController {
                 return next(new ErrorResponse('Super admin accounts cannot be created from this route', 403));
             }
 
+            const role = req.body.role as UserRole;
+            const emailRaw = String(req.body.email ?? '')
+                .trim()
+                .toLowerCase();
+            const emailPattern = /^\S+@\S+\.\S+$/;
+
+            if (role === UserRole.SCHOOL_ADMIN) {
+                if (!emailRaw || !emailPattern.test(emailRaw)) {
+                    return next(
+                        new ErrorResponse(
+                            'A valid email address is required for school admin accounts',
+                            400
+                        )
+                    );
+                }
+                req.body.email = emailRaw;
+            } else if (emailRaw === '') {
+                delete req.body.email;
+            } else if (!emailPattern.test(emailRaw)) {
+                return next(new ErrorResponse('Please provide a valid email address', 400));
+            } else {
+                req.body.email = emailRaw;
+            }
+
             if (req.body.role === UserRole.STAFF_OTHER) {
                 const title = String(req.body.staffRoleTitle || '').trim();
                 if (title.length < 2) {
@@ -127,21 +151,60 @@ class UserController {
                 req.body.staffRoleTitle = undefined;
             }
 
-            const normalizedPhone = parseAndValidateStaffPhone(String(req.body.phone || ''));
+            const nameTrim = String(req.body.name ?? '').trim();
+            if (nameTrim.length < 3) {
+                return next(new ErrorResponse('Please provide a full name (at least 3 characters)', 400));
+            }
+            req.body.name = nameTrim;
+
+            const phoneRaw = String(req.body.phone ?? '').trim();
+            if (!phoneRaw) {
+                return next(new ErrorResponse('Phone number is required', 400));
+            }
+            let normalizedPhone: string;
+            try {
+                normalizedPhone = parseAndValidateStaffPhone(phoneRaw);
+            } catch (e) {
+                return next(e as Error);
+            }
             req.body.phone = normalizedPhone;
             req.body.username = normalizedPhone;
 
-            const emailRaw = req.body.email != null ? String(req.body.email).trim() : '';
-            if (emailRaw === '') {
-                delete req.body.email;
+            if (req.body.role === UserRole.TEACHER) {
+                const sub = String(req.body.subject ?? '').trim();
+                if (sub.length < 1) {
+                    return next(new ErrorResponse('Primary subject / specialization is required for teachers', 400));
+                }
+                req.body.subject = sub;
             } else {
-                req.body.email = emailRaw.toLowerCase();
+                delete req.body.subject;
+            }
+
+            const bs = req.body.baseSalary;
+            if (req.body.role !== UserRole.SCHOOL_ADMIN) {
+                if (bs === '' || bs == null || Number.isNaN(Number(bs))) {
+                    return next(new ErrorResponse('Base salary is required', 400));
+                }
+                req.body.baseSalary = Number(bs);
+            } else if (bs === '' || bs == null || Number.isNaN(Number(bs))) {
+                req.body.baseSalary = 0;
+            } else {
+                req.body.baseSalary = Number(bs);
+            }
+
+            if (!req.body.joiningDate) {
+                return next(new ErrorResponse('Joining date is required', 400));
             }
 
             if (!req.body.password) {
-                const firstName = (req.body.name || '').split(' ')[0].toLowerCase() || 'staff';
-                const phoneLast4 = normalizedPhone.slice(-4) || '1234';
-                req.body.password = firstName + phoneLast4;
+                const firstName =
+                    (req.body.name || '').split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'staff';
+                const phoneLast4 = normalizedPhone.slice(-4);
+                let pwd = `${firstName}${phoneLast4}`;
+                if (pwd.length < 6) {
+                    pwd = `${firstName}123456`.slice(0, 24);
+                }
+                req.body.password = pwd;
             }
             req.body.plainPassword = req.body.password;
 
@@ -156,6 +219,15 @@ class UserController {
                             409
                         )
                     );
+                }
+                const dup = err as { code?: number; message?: string };
+                if (
+                    dup?.code === 11000 &&
+                    String(dup.message || '')
+                        .toLowerCase()
+                        .includes('email')
+                ) {
+                    return next(new ErrorResponse('This email is already registered', 409));
                 }
                 throw err;
             }
