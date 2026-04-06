@@ -15,6 +15,17 @@ const EXCLUDED_SET = new Set(EXCLUDED_ROLES);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Calendar YYYY-MM-DD (UTC) from account creation or explicit joining date — absence totals count from this day onward. */
+function joinStartYmd(user: { joiningDate?: Date | null; createdAt?: Date | null }): string {
+    const d =
+        user.joiningDate != null
+            ? new Date(user.joiningDate)
+            : user.createdAt != null
+              ? new Date(user.createdAt)
+              : new Date(0);
+    return d.toISOString().slice(0, 10);
+}
+
 /**
  * Attendance dates are calendar YYYY-MM-DD from the browser. Hosted APIs often run in UTC, so
  * "today" in IST can be ahead of the server's calendar day. Prefer `X-Client-Date` from the client;
@@ -70,11 +81,45 @@ class StaffAttendanceController {
                 role: { $nin: EXCLUDED_ROLES },
                 isActive: { $ne: false },
             })
-                .select('name role staffRoleTitle')
+                .select('name role staffRoleTitle joiningDate createdAt')
                 .sort({ name: 1 })
                 .lean();
 
-            return res.status(200).json({ success: true, data: users });
+            const staffIds = users.map((u) => u._id);
+            const fromYmdByStaff = new Map<string, string>(
+                users.map((u) => [String(u._id), joinStartYmd(u)])
+            );
+
+            const absenceRows =
+                staffIds.length === 0
+                    ? []
+                    : await StaffAbsentDay.find({
+                          schoolId,
+                          staffId: { $in: staffIds },
+                      })
+                          .select('staffId date')
+                          .lean();
+
+            const totalAbsencesByStaff = new Map<string, number>();
+            for (const id of staffIds) {
+                totalAbsencesByStaff.set(String(id), 0);
+            }
+            for (const row of absenceRows) {
+                const sid = String(row.staffId);
+                const fromYmd = fromYmdByStaff.get(sid);
+                if (fromYmd == null || row.date < fromYmd) continue;
+                totalAbsencesByStaff.set(sid, (totalAbsencesByStaff.get(sid) ?? 0) + 1);
+            }
+
+            const data = users.map((u) => ({
+                _id: u._id,
+                name: u.name,
+                role: u.role,
+                staffRoleTitle: u.staffRoleTitle,
+                totalAbsences: totalAbsencesByStaff.get(String(u._id)) ?? 0,
+            }));
+
+            return res.status(200).json({ success: true, data });
         } catch (e) {
             return next(e);
         }

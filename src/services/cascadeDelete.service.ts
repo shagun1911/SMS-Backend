@@ -35,18 +35,25 @@ import { UserRole } from '../types';
 
 /**
  * Match slot/cell teacherId to staff (handles ObjectId, populated user doc, sparse/null array entries).
+ * Note: mongoose Types.ObjectId defines `_id` as a getter that returns `this`, so unwrapping `_id`
+ * without an ObjectId check causes infinite recursion and stack overflow.
  */
 function staffRefMatches(ref: unknown, staffObjectId: mongoose.Types.ObjectId): boolean {
     if (ref == null) return false;
-    const asObj = ref as { _id?: unknown; equals?: (other: unknown) => boolean };
-    if (asObj._id != null) {
-        return staffRefMatches(asObj._id, staffObjectId);
+    if (ref instanceof mongoose.Types.ObjectId) {
+        return ref.equals(staffObjectId);
     }
-    if (typeof asObj.equals === 'function') {
-        try {
-            return Boolean(asObj.equals(staffObjectId));
-        } catch {
-            return false;
+    if (typeof ref === 'object') {
+        const asObj = ref as { _id?: unknown; equals?: (other: unknown) => boolean };
+        if (asObj._id != null && asObj._id !== ref) {
+            return staffRefMatches(asObj._id, staffObjectId);
+        }
+        if (typeof asObj.equals === 'function') {
+            try {
+                return Boolean(asObj.equals(staffObjectId));
+            } catch {
+                return false;
+            }
         }
     }
     return String(ref) === String(staffObjectId);
