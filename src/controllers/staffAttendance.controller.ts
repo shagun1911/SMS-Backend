@@ -15,15 +15,37 @@ const EXCLUDED_SET = new Set(EXCLUDED_ROLES);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function assertNotFutureYmd(dateStr: string): void {
+/**
+ * Attendance dates are calendar YYYY-MM-DD from the browser. Hosted APIs often run in UTC, so
+ * "today" in IST can be ahead of the server's calendar day. Prefer `X-Client-Date` from the client;
+ * otherwise allow up through UTC "tomorrow" so timezones ahead of UTC are not blocked.
+ */
+function assertNotFutureYmd(dateStr: string, req: AuthRequest): void {
     if (!DATE_RE.test(dateStr)) {
         throw new ErrorResponse('Invalid date format; use YYYY-MM-DD', 400);
     }
+
+    const rawHeader = req.headers['x-client-date'];
+    const header =
+        typeof rawHeader === 'string'
+            ? rawHeader.trim().split(',')[0].trim()
+            : Array.isArray(rawHeader)
+              ? String(rawHeader[0] ?? '').trim()
+              : '';
+
+    if (DATE_RE.test(header)) {
+        if (dateStr > header) {
+            throw new ErrorResponse('Cannot mark attendance for a future date', 400);
+        }
+        return;
+    }
+
     const [y, m, d] = dateStr.split('-').map(Number);
-    const input = new Date(y, m - 1, d);
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    if (input > todayStart) {
+    const inputUtc = Date.UTC(y, m - 1, d);
+    const now = new Date();
+    const utcTodayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const maxUtc = utcTodayStart + 24 * 60 * 60 * 1000;
+    if (inputUtc > maxUtc) {
         throw new ErrorResponse('Cannot mark attendance for a future date', 400);
     }
 }
@@ -90,7 +112,7 @@ class StaffAttendanceController {
             if (!date || !DATE_RE.test(date)) {
                 return next(new ErrorResponse('date (YYYY-MM-DD) is required', 400));
             }
-            assertNotFutureYmd(date);
+            assertNotFutureYmd(date, req);
             if (!marks || typeof marks !== 'object' || Array.isArray(marks)) {
                 return next(new ErrorResponse('marks object is required', 400));
             }
