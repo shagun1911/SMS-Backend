@@ -33,6 +33,25 @@ import { deleteFromCloudinary } from '../utils/cloudinary';
 import { isLikelyCloudinaryAssetUrl, parseCloudinaryPublicIdFromUrl } from '../utils/cloudinaryUrl';
 import { UserRole } from '../types';
 
+/**
+ * Match slot/cell teacherId to staff (handles ObjectId, populated user doc, sparse/null array entries).
+ */
+function staffRefMatches(ref: unknown, staffObjectId: mongoose.Types.ObjectId): boolean {
+    if (ref == null) return false;
+    const asObj = ref as { _id?: unknown; equals?: (other: unknown) => boolean };
+    if (asObj._id != null) {
+        return staffRefMatches(asObj._id, staffObjectId);
+    }
+    if (typeof asObj.equals === 'function') {
+        try {
+            return Boolean(asObj.equals(staffObjectId));
+        } catch {
+            return false;
+        }
+    }
+    return String(ref) === String(staffObjectId);
+}
+
 async function deleteCloudinaryUrls(urls: (string | undefined | null)[]): Promise<void> {
     const unique = [...new Set(urls.filter(Boolean) as string[])];
     for (const url of unique) {
@@ -55,8 +74,10 @@ async function stripStaffFromTimetables(
     const timetables = await Timetable.find({ schoolId, 'slots.teacherId': staffObjectId }).session(session);
     for (const doc of timetables) {
         let dirty = false;
-        for (const slot of doc.slots) {
-            if (slot.teacherId && slot.teacherId.equals(staffObjectId)) {
+        const slots = doc.slots ?? [];
+        for (const slot of slots) {
+            if (slot == null || typeof slot !== 'object') continue;
+            if (staffRefMatches((slot as { teacherId?: unknown }).teacherId, staffObjectId)) {
                 (slot as { teacherId?: mongoose.Types.ObjectId }).teacherId = undefined;
                 dirty = true;
             }
@@ -70,9 +91,12 @@ async function stripStaffFromTimetables(
     const grids = await SchoolTimetableGrid.find({ schoolId }).session(session);
     for (const g of grids) {
         let dirty = false;
-        for (const row of g.rows) {
+        const rows = g.rows ?? [];
+        for (const row of rows) {
+            if (row == null || typeof row !== 'object' || !Array.isArray(row.cells)) continue;
             for (const cell of row.cells) {
-                if (cell.teacherId && cell.teacherId.equals(staffObjectId)) {
+                if (cell == null || typeof cell !== 'object') continue;
+                if (staffRefMatches((cell as { teacherId?: unknown }).teacherId, staffObjectId)) {
                     (cell as { teacherId?: mongoose.Types.ObjectId }).teacherId = undefined;
                     dirty = true;
                 }
