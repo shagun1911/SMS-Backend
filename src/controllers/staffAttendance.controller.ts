@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import StaffAbsentDay from '../models/staffAbsentDay.model';
+import StaffPresentDay from '../models/staffPresentDay.model';
 import User from '../models/user.model';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
@@ -132,13 +133,15 @@ class StaffAttendanceController {
             if (!DATE_RE.test(date)) {
                 return next(new ErrorResponse('Query ?date=YYYY-MM-DD is required', 400));
             }
-            const docs = await StaffAbsentDay.find({ schoolId, date })
-                .select('staffId')
-                .lean();
-            const absentStaffIds = docs.map((d) => String(d.staffId));
+            const [absentDocs, presentDocs] = await Promise.all([
+                StaffAbsentDay.find({ schoolId, date }).select('staffId').lean(),
+                StaffPresentDay.find({ schoolId, date }).select('staffId').lean(),
+            ]);
+            const absentStaffIds = absentDocs.map((d) => String(d.staffId));
+            const presentStaffIds = presentDocs.map((d) => String(d.staffId));
             return res.status(200).json({
                 success: true,
-                data: { absentStaffIds },
+                data: { absentStaffIds, presentStaffIds },
             });
         } catch (e) {
             return next(e);
@@ -151,7 +154,7 @@ class StaffAttendanceController {
             const adminId = req.user!._id;
             const { date, marks } = req.body as {
                 date?: string;
-                marks?: Record<string, 'PRESENT' | 'ABSENT'>;
+                marks?: Record<string, 'PRESENT' | 'ABSENT' | 'PENDING'>;
             };
 
             if (!date || !DATE_RE.test(date)) {
@@ -165,6 +168,7 @@ class StaffAttendanceController {
             const eligible = await User.find({
                 schoolId,
                 role: { $nin: EXCLUDED_ROLES },
+                isActive: { $ne: false },
             })
                 .select('_id')
                 .lean();
@@ -179,8 +183,10 @@ class StaffAttendanceController {
                         )
                     );
                 }
-                if (status !== 'PRESENT' && status !== 'ABSENT') {
-                    return next(new ErrorResponse('Each mark must be PRESENT or ABSENT', 400));
+                if (status !== 'PRESENT' && status !== 'ABSENT' && status !== 'PENDING') {
+                    return next(
+                        new ErrorResponse('Each mark must be PRESENT, ABSENT, or PENDING', 400)
+                    );
                 }
             }
 
@@ -199,7 +205,28 @@ class StaffAttendanceController {
                     for (const [staffIdRaw, status] of Object.entries(marks)) {
                         const staffOid = new mongoose.Types.ObjectId(staffIdRaw);
                         if (status === 'ABSENT') {
+                            await StaffPresentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
                             await StaffAbsentDay.findOneAndUpdate(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                {
+                                    $set: {
+                                        schoolId: schoolOid,
+                                        staffId: staffOid,
+                                        date,
+                                        markedBy: adminId,
+                                    },
+                                },
+                                { upsert: true, new: true, session }
+                            );
+                        } else if (status === 'PRESENT') {
+                            await StaffAbsentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
+                            await StaffPresentDay.findOneAndUpdate(
                                 { schoolId: schoolOid, staffId: staffOid, date },
                                 {
                                     $set: {
@@ -216,6 +243,10 @@ class StaffAttendanceController {
                                 { schoolId: schoolOid, staffId: staffOid, date },
                                 { session }
                             );
+                            await StaffPresentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
                         }
                     }
                 });
@@ -224,6 +255,92 @@ class StaffAttendanceController {
             }
 
             return res.status(200).json({ success: true, message: 'Attendance saved' });
+        } catch (e) {
+            return next(e);
+        }
+    }
+
+    /**
+     * End-of-day: everyone with an explicit present mark for this date stays present (stored as no absent row);
+     * everyone else is recorded absent. Clears StaffPresentDay rows for the date after processing.
+     */
+    async finalizeDay(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const schoolId = req.schoolId!;
+            const adminId = req.user!._id;
+            const { date } = req.body as { date?: string };
+
+            if (!date || !DATE_RE.test(date)) {
+                return next(new ErrorResponse('date (YYYY-MM-DD) is required', 400));
+            }
+            assertNotFutureYmd(date, req);
+
+            const eligible = await User.find({
+                schoolId,
+                role: { $nin: EXCLUDED_ROLES },
+                isActive: { $ne: false },
+            })
+                .select('_id')
+                .lean();
+
+            const schoolOid = new mongoose.Types.ObjectId(schoolId);
+            let presentCount = 0;
+            let absentCount = 0;
+
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    for (const u of eligible) {
+                        const staffOid = u._id as mongoose.Types.ObjectId;
+                        const hasPresent = await StaffPresentDay.findOne({
+                            schoolId: schoolOid,
+                            staffId: staffOid,
+                            date,
+                        })
+                            .select('_id')
+                            .session(session)
+                            .lean();
+
+                        if (hasPresent) {
+                            await StaffAbsentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
+                            await StaffPresentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
+                            presentCount += 1;
+                        } else {
+                            await StaffAbsentDay.findOneAndUpdate(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                {
+                                    $set: {
+                                        schoolId: schoolOid,
+                                        staffId: staffOid,
+                                        date,
+                                        markedBy: adminId,
+                                    },
+                                },
+                                { upsert: true, new: true, session }
+                            );
+                            await StaffPresentDay.deleteOne(
+                                { schoolId: schoolOid, staffId: staffOid, date },
+                                { session }
+                            );
+                            absentCount += 1;
+                        }
+                    }
+                });
+            } finally {
+                session.endSession();
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: 'Staff attendance finalized for this date',
+                data: { presentCount, absentCount },
+            });
         } catch (e) {
             return next(e);
         }
