@@ -28,6 +28,7 @@ import Usage from '../models/usage.model';
 import AttendanceDay from '../models/attendanceDay.model';
 import StaffAbsentDay from '../models/staffAbsentDay.model';
 import StaffPresentDay from '../models/staffPresentDay.model';
+import TransportAttendance from '../models/transportAttendance.model';
 import StudentNotification from '../models/studentNotification.model';
 import { updateUsageForSchool } from './usage.service';
 import { deleteFromCloudinary } from '../utils/cloudinary';
@@ -170,6 +171,7 @@ class CascadeDeleteService {
                 await Promise.all([
                     StaffAbsentDay.deleteMany({ schoolId, staffId }).session(session),
                     StaffPresentDay.deleteMany({ schoolId, staffId }).session(session),
+                    TransportAttendance.deleteMany({ schoolId, userId: staffId }).session(session),
                     Salary.deleteMany({ schoolId, staffId }).session(session),
                     SalaryStructure.deleteMany({ schoolId, staffId }).session(session),
                     OtherPayment.deleteMany({ schoolId, staffId }).session(session),
@@ -235,6 +237,7 @@ class CascadeDeleteService {
                     StudentNotification.deleteMany({ schoolId }).session(session),
                     StaffAbsentDay.deleteMany({ schoolId }).session(session),
                     StaffPresentDay.deleteMany({ schoolId }).session(session),
+                    TransportAttendance.deleteMany({ schoolId }).session(session),
                     AttendanceDay.deleteMany({ schoolId }).session(session),
                     StudentFee.deleteMany({ schoolId }).session(session),
                     FeePayment.deleteMany({ schoolId }).session(session),

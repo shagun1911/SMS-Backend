@@ -26,6 +26,7 @@ import supportRoutes from './support.routes';
 import attendanceRoutes from './attendance.routes';
 import staffAttendanceRoutes from './staffAttendance.routes';
 import studentNotificationRoutes from './studentNotification.routes';
+import transportAttendanceRoutes from './transportAttendance.routes';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ router.use('/sessions', sessionRoutes);
 router.use('/classes', classRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/staff-attendance', staffAttendanceRoutes);
+router.use('/transport-attendance', transportAttendanceRoutes);
 router.use('/student-notifications', studentNotificationRoutes);
 router.use('/timetable', timetableRoutes);
 

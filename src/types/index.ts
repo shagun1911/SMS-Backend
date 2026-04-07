@@ -38,6 +38,7 @@ export interface IUser extends Document {
     qualification?: string;
     joiningDate?: Date;
     baseSalary?: number;
+    totalAbsentCount?: number;
     salary?: number;
     bankDetails?: {
         accountNumber: string;

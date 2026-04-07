@@ -117,6 +117,10 @@ const userSchema = new Schema<IUser, IUserModel>(
             type: Number,
             default: 0,
         },
+        totalAbsentCount: {
+            type: Number,
+            default: 0,
+        },
         // Metadata
         isActive: {
             type: Boolean,
