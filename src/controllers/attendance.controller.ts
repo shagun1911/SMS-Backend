@@ -3,7 +3,9 @@ import mongoose from 'mongoose';
 import AttendanceDay from '../models/attendanceDay.model';
 import Class from '../models/class.model';
 import Student from '../models/student.model';
-import { AuthRequest } from '../types';
+import StaffAbsentDay from '../models/staffAbsentDay.model';
+import StaffPresentDay from '../models/staffPresentDay.model';
+import { AuthRequest, UserRole } from '../types';
 import { sendResponse } from '../utils/response';
 import ErrorResponse from '../utils/errorResponse';
 import { scheduleAbsentStudentNotifications } from '../services/attendanceNotify.service';
@@ -14,6 +16,86 @@ function normalizeYmd(raw: unknown): string | null {
 }
 
 class AttendanceController {
+    /**
+     * GET /attendance/me?year=&month=
+     * Read-only staff attendance for teacher/accountant/transport_manager/cleaning/staff_other.
+     */
+    async getMyAttendance(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const me = req.user;
+            if (!me || !req.schoolId) return next(new ErrorResponse('Not authorized', 401));
+            const allowed = new Set<UserRole>([
+                UserRole.TEACHER,
+                UserRole.ACCOUNTANT,
+                UserRole.TRANSPORT_MANAGER,
+                UserRole.CLEANING_STAFF,
+                UserRole.STAFF_OTHER,
+            ]);
+            const role = me.role as UserRole;
+            if (!allowed.has(role)) {
+                return next(new ErrorResponse('Attendance view is not available for this role', 403));
+            }
+
+            const yearQ = Number(req.query.year);
+            const monthQ = Number(req.query.month);
+            let year = yearQ;
+            let month = monthQ;
+            if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+                const parts = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                })
+                    .formatToParts(new Date())
+                    .reduce<Record<string, string>>((acc, p) => {
+                        if (p.type === 'year' || p.type === 'month') acc[p.type] = p.value;
+                        return acc;
+                    }, {});
+                year = Number(parts.year);
+                month = Number(parts.month);
+            }
+            const mm = String(month).padStart(2, '0');
+            const start = `${year}-${mm}-01`;
+            const end = `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+
+            const schoolId = req.schoolId!;
+            const userId = String(me._id);
+
+            const [absentDocs, presentDocs, totalAbsents] = await Promise.all([
+                StaffAbsentDay.find({ schoolId, staffId: userId, date: { $gte: start, $lte: end } })
+                    .select('date')
+                    .sort({ date: 1 })
+                    .lean(),
+                StaffPresentDay.find({ schoolId, staffId: userId, date: { $gte: start, $lte: end } })
+                    .select('date')
+                    .sort({ date: 1 })
+                    .lean(),
+                StaffAbsentDay.countDocuments({ schoolId, staffId: userId }),
+            ]);
+
+            const byDate = new Map<string, { date: string; status: 'present' | 'absent' }>();
+            for (const d of presentDocs) byDate.set(d.date, { date: d.date, status: 'present' });
+            for (const d of absentDocs) byDate.set(d.date, { date: d.date, status: 'absent' });
+            const attendance = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+            const totalAbsentsThisMonth = absentDocs.length;
+
+            return sendResponse(
+                res,
+                {
+                    year,
+                    month,
+                    attendance,
+                    totalAbsents,
+                    totalAbsentsThisMonth,
+                },
+                'My attendance',
+                200
+            );
+        } catch (error) {
+            next(error);
+        }
+    }
+
     /**
      * GET /attendance/day?classId=&date= — whether this class/date already has a record.
      */

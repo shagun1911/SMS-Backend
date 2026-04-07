@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import StaffAbsentDay from '../models/staffAbsentDay.model';
 import StaffPresentDay from '../models/staffPresentDay.model';
 import User from '../models/user.model';
+import UserNotification from '../models/userNotification.model';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 
@@ -286,6 +287,15 @@ class StaffAttendanceController {
             const schoolOid = new mongoose.Types.ObjectId(schoolId);
             let presentCount = 0;
             let absentCount = 0;
+            const absentNotifications: Array<{
+                userId: mongoose.Types.ObjectId;
+                schoolId: mongoose.Types.ObjectId;
+                title: string;
+                message: string;
+                type: string;
+                isRead: boolean;
+                metadata: Record<string, unknown>;
+            }> = [];
 
             const session = await mongoose.startSession();
             try {
@@ -321,7 +331,19 @@ class StaffAttendanceController {
                                 { upsert: true, new: true, session }
                             );
                             absentCount += 1;
+                            absentNotifications.push({
+                                userId: staffOid,
+                                schoolId: schoolOid,
+                                title: 'Attendance Alert',
+                                message: 'You have been marked absent today.',
+                                type: 'attendance',
+                                isRead: false,
+                                metadata: { date, status: 'absent' },
+                            });
                         }
+                    }
+                    if (absentNotifications.length > 0) {
+                        await UserNotification.insertMany(absentNotifications, { session });
                     }
                 });
             } finally {

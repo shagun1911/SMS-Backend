@@ -13,6 +13,18 @@ router.get(
     AttendanceController.getDayStatus
 );
 
+router.get(
+    '/me',
+    authorize(
+        UserRole.TEACHER,
+        UserRole.ACCOUNTANT,
+        UserRole.TRANSPORT_MANAGER,
+        UserRole.CLEANING_STAFF,
+        UserRole.STAFF_OTHER
+    ),
+    AttendanceController.getMyAttendance.bind(AttendanceController)
+);
+
 router.post(
     '/',
     authorize(UserRole.SCHOOL_ADMIN, UserRole.TEACHER),
