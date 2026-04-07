@@ -122,9 +122,10 @@ class UserController {
                 .trim()
                 .toLowerCase();
             const emailPattern = /^\S+@\S+\.\S+$/;
+            const emailNormalized = emailRaw === 'undefined' || emailRaw === 'null' ? '' : emailRaw;
 
             if (role === UserRole.SCHOOL_ADMIN) {
-                if (!emailRaw || !emailPattern.test(emailRaw)) {
+                if (!emailNormalized || !emailPattern.test(emailNormalized)) {
                     return next(
                         new ErrorResponse(
                             'A valid email address is required for school admin accounts',
@@ -132,13 +133,13 @@ class UserController {
                         )
                     );
                 }
-                req.body.email = emailRaw;
-            } else if (emailRaw === '') {
+                req.body.email = emailNormalized;
+            } else if (emailNormalized === '') {
                 delete req.body.email;
-            } else if (!emailPattern.test(emailRaw)) {
+            } else if (!emailPattern.test(emailNormalized)) {
                 return next(new ErrorResponse('Please provide a valid email address', 400));
             } else {
-                req.body.email = emailRaw;
+                req.body.email = emailNormalized;
             }
 
             if (req.body.role === UserRole.STAFF_OTHER) {
@@ -169,6 +170,14 @@ class UserController {
             }
             req.body.phone = normalizedPhone;
             req.body.username = normalizedPhone;
+            const existingByUsername = await User.findOne({ username: normalizedPhone })
+                .select('_id')
+                .lean();
+            if (existingByUsername) {
+                return next(
+                    new ErrorResponse('This phone number is already registered for another staff user', 409)
+                );
+            }
 
             if (req.body.role === UserRole.TEACHER) {
                 const sub = String(req.body.subject ?? '').trim();
@@ -220,14 +229,43 @@ class UserController {
                         )
                     );
                 }
-                const dup = err as { code?: number; message?: string };
-                if (
-                    dup?.code === 11000 &&
-                    String(dup.message || '')
-                        .toLowerCase()
-                        .includes('email')
-                ) {
-                    return next(new ErrorResponse('This email is already registered', 409));
+                const dup = err as {
+                    code?: number;
+                    message?: string;
+                    keyPattern?: Record<string, unknown>;
+                };
+                if (dup?.code === 11000) {
+                    const keyPattern = dup.keyPattern || {};
+                    if (Object.prototype.hasOwnProperty.call(keyPattern, 'email')) {
+                        return next(new ErrorResponse('This email is already registered', 409));
+                    }
+                    if (Object.prototype.hasOwnProperty.call(keyPattern, 'username')) {
+                        return next(
+                            new ErrorResponse(
+                                'This phone number is already registered for another staff user',
+                                409
+                            )
+                        );
+                    }
+                    if (
+                        String(dup.message || '')
+                            .toLowerCase()
+                            .includes('email')
+                    ) {
+                        return next(new ErrorResponse('This email is already registered', 409));
+                    }
+                    if (
+                        String(dup.message || '')
+                            .toLowerCase()
+                            .includes('username')
+                    ) {
+                        return next(
+                            new ErrorResponse(
+                                'This phone number is already registered for another staff user',
+                                409
+                            )
+                        );
+                    }
                 }
                 throw err;
             }

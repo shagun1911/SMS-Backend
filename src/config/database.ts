@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import config from './index';
+import User from '../models/user.model';
 
 const connectDB = async (): Promise<void> => {
     try {
@@ -17,8 +18,33 @@ const connectDB = async (): Promise<void> => {
 };
 
 const createIndexes = async () => {
-    // We'll call ensureIndexes on critical models here once they are imported
-    console.log('📊 Database indexes verified');
+    try {
+        const indexes = await User.collection.indexes();
+        const emailIndexes = indexes.filter((idx) => idx.key?.email === 1);
+
+        for (const idx of emailIndexes) {
+            const isExpected =
+                idx.unique === true &&
+                (idx.sparse === true ||
+                    (idx.partialFilterExpression &&
+                        Object.prototype.hasOwnProperty.call(idx.partialFilterExpression, 'email')));
+
+            if (!isExpected && idx.name && idx.name !== '_id_') {
+                await User.collection.dropIndex(idx.name);
+                console.log(`🧹 Dropped legacy email index: ${idx.name}`);
+            }
+        }
+
+        // Recreate expected unique sparse index for optional staff emails.
+        await User.collection.createIndex(
+            { email: 1 },
+            { unique: true, sparse: true, name: 'email_1' }
+        );
+        await User.syncIndexes();
+        console.log('📊 Database indexes verified (User indexes synced)');
+    } catch (error: any) {
+        console.error(`⚠️ Index verification warning: ${error?.message || error}`);
+    }
 };
 
 // Handle connection events

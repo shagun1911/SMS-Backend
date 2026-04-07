@@ -262,7 +262,7 @@ class StaffAttendanceController {
 
     /**
      * End-of-day: everyone with an explicit present mark for this date stays present (stored as no absent row);
-     * everyone else is recorded absent. Clears StaffPresentDay rows for the date after processing.
+     * everyone else is recorded absent. Present marks are kept so the UI can show who was present.
      */
     async finalizeDay(req: AuthRequest, res: Response, next: NextFunction) {
         try {
@@ -306,10 +306,6 @@ class StaffAttendanceController {
                                 { schoolId: schoolOid, staffId: staffOid, date },
                                 { session }
                             );
-                            await StaffPresentDay.deleteOne(
-                                { schoolId: schoolOid, staffId: staffOid, date },
-                                { session }
-                            );
                             presentCount += 1;
                         } else {
                             await StaffAbsentDay.findOneAndUpdate(
@@ -323,10 +319,6 @@ class StaffAttendanceController {
                                     },
                                 },
                                 { upsert: true, new: true, session }
-                            );
-                            await StaffPresentDay.deleteOne(
-                                { schoolId: schoolOid, staffId: staffOid, date },
-                                { session }
                             );
                             absentCount += 1;
                         }
