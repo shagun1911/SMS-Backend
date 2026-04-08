@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest, UserRole } from '../types';
 import Bus from '../models/bus.model';
+import BusLocation from '../models/busLocation.model';
 import Student from '../models/student.model';
 import User from '../models/user.model';
 import { getTenantFilter } from '../utils/tenant';
@@ -14,6 +15,8 @@ function staffIdentityKey(name?: string, phone?: string): string | null {
     if (!n && !p) return null;
     return `${n}|${p}`;
 }
+
+const MANAGER_ONLINE_WINDOW_MS = 10_000;
 
 /**
  * Before saving a bus: remove this driver/conductor from every other bus in the school.
@@ -189,9 +192,29 @@ class TransportController {
                 busId: bus._id,
             }).select('firstName lastName admissionNumber class section rollNumber phone username');
 
+            const loc = await BusLocation.findOne({ busId: bus._id })
+                .select('lat lng updatedAt updatedBy')
+                .lean();
+            let updatedByRole: 'driver' | 'conductor' | null = null;
+            if (loc?.updatedBy) {
+                const updater = await User.findById(loc.updatedBy).select('role').lean();
+                if (updater?.role === UserRole.BUS_DRIVER) updatedByRole = 'driver';
+                else if (updater?.role === UserRole.CONDUCTOR) updatedByRole = 'conductor';
+            }
+            const now = Date.now();
+            const updatedAt = loc?.updatedAt ? new Date(loc.updatedAt) : null;
+            const ageMs = updatedAt ? now - updatedAt.getTime() : Number.POSITIVE_INFINITY;
+            const location = {
+                latitude: typeof loc?.lat === 'number' ? loc.lat : null,
+                longitude: typeof loc?.lng === 'number' ? loc.lng : null,
+                updatedAt,
+                updatedByRole,
+                isOnline: ageMs <= MANAGER_ONLINE_WINDOW_MS,
+            };
+
             sendResponse(
                 res,
-                { bus, students },
+                { bus, students, location },
                 'Bus details retrieved',
                 200
             );

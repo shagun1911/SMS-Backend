@@ -114,6 +114,7 @@ class BusLocationController {
             next(e);
         }
     }
+
 }
 
 export default new BusLocationController();
