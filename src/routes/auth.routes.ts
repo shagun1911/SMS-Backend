@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { protect, authorize } from '../middleware/auth.middleware';
 import AuthController from '../controllers/auth.controller';
 import BusLocationController from '../controllers/busLocation.controller';
+import FcmController from '../controllers/fcm.controller';
 import { UserRole } from '../types';
 
 const router = Router();
@@ -13,6 +14,7 @@ router.get('/logout', protect, AuthController.logout);
 router.post('/change-password', protect, AuthController.changePassword);
 router.post('/verify-password', protect, AuthController.verifyPassword);
 router.post('/refresh-token', AuthController.refreshToken);
+router.post('/save-device-token', protect, FcmController.saveDeviceToken);
 
 router.get(
     '/crew/bus-assignment',

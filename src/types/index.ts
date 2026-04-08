@@ -51,6 +51,8 @@ export interface IUser extends Document {
     mustChangePassword?: boolean;
     permissions?: string[];
     refreshToken?: string;
+    /** FCM registration tokens for this staff user (multiple devices). */
+    fcmTokens?: string[];
     createdAt: Date;
     updatedAt: Date;
     matchPassword(enteredPassword: string): Promise<boolean>;
@@ -216,6 +218,8 @@ export interface IStudent extends Document {
     plainPassword?: string;
     mustChangePassword?: boolean;
     lastLogin?: Date;
+    /** FCM registration tokens for this student (multiple devices). */
+    fcmTokens?: string[];
     createdAt: Date;
     updatedAt: Date;
     // Methods

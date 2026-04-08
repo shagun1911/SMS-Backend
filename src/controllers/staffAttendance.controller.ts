@@ -4,6 +4,7 @@ import StaffAbsentDay from '../models/staffAbsentDay.model';
 import StaffPresentDay from '../models/staffPresentDay.model';
 import User from '../models/user.model';
 import UserNotification from '../models/userNotification.model';
+import { sendNotificationToStaffUsers } from '../services/fcm.service';
 import ErrorResponse from '../utils/errorResponse';
 import { AuthRequest, UserRole } from '../types';
 
@@ -348,6 +349,15 @@ class StaffAttendanceController {
                 });
             } finally {
                 session.endSession();
+            }
+
+            if (absentNotifications.length > 0) {
+                const ids = [...new Set(absentNotifications.map((n) => String(n.userId)))];
+                void sendNotificationToStaffUsers(
+                    ids,
+                    'Attendance Alert',
+                    'You have been marked absent today.'
+                );
             }
 
             return res.status(200).json({

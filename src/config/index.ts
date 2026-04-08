@@ -59,6 +59,10 @@ interface IConfig {
         webhookPassword: string;
         successPath: string;
     };
+    /** Firebase Admin: paste full service account JSON as a single line in env (optional). */
+    firebase?: {
+        serviceAccountJson?: string;
+    };
 }
 
 const config: IConfig = {
@@ -137,6 +141,10 @@ const config: IConfig = {
         webhookPassword: process.env.PHONEPE_WEBHOOK_PASSWORD || '',
         successPath: process.env.PHONEPE_SUCCESS_PATH || '/plan',
     },
+    firebase: (() => {
+        const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+        return raw ? { serviceAccountJson: raw } : undefined;
+    })(),
 };
 
 export default config;

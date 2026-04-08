@@ -5,6 +5,7 @@ import ErrorResponse from '../utils/errorResponse';
 import User from '../models/user.model';
 import TransportAttendance from '../models/transportAttendance.model';
 import UserNotification from '../models/userNotification.model';
+import { sendNotificationToStaffUsers } from '../services/fcm.service';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CREW_ROLES: UserRole[] = [UserRole.BUS_DRIVER, UserRole.CONDUCTOR];
@@ -252,6 +253,15 @@ class TransportAttendanceController {
                 });
             } finally {
                 session.endSession();
+            }
+
+            if (absentNotifications.length > 0) {
+                const ids = [...new Set(absentNotifications.map((n) => String(n.userId)))];
+                void sendNotificationToStaffUsers(
+                    ids,
+                    'Attendance Alert',
+                    'You have been marked absent today.'
+                );
             }
 
             return res.status(200).json({

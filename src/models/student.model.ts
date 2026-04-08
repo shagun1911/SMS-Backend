@@ -162,6 +162,10 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
         plainPassword: { type: String },
         mustChangePassword: { type: Boolean, default: true },
         lastLogin: { type: Date, default: null },
+        fcmTokens: {
+            type: [String],
+            default: [],
+        },
     },
     {
         timestamps: true,
