@@ -5,6 +5,7 @@ import StudentFeeRepository from '../repositories/studentFee.repository';
 import StudentRepository from '../repositories/student.repository';
 import SessionRepository from '../repositories/session.repository';
 import SchoolRepository from '../repositories/school.repository';
+import TransportDestinationRepository from '../repositories/transportDestination.repository';
 import ErrorResponse from '../utils/errorResponse';
 import { Types } from 'mongoose';
 import StudentFee from '../models/studentFee.model';
@@ -61,6 +62,20 @@ class FeeService {
         return Math.min(annualRecurringTotal, flat + fromPct);
     }
 
+    private async resolveTransportMonthlyFee(student: any): Promise<{ amount: number; title?: string }> {
+        if (!student?.usesTransport || !student?.transportDestinationId) return { amount: 0 };
+        const destination = await TransportDestinationRepository.findById(
+            String(student.transportDestinationId)
+        );
+        if (!destination) return { amount: 0 };
+        return {
+            amount: Number(destination.monthlyFee) || 0,
+            title: destination.destinationName
+                ? `Transport - ${destination.destinationName}`
+                : 'Transport Fee',
+        };
+    }
+
     /** For receipt PDF row: total annual concession on monthly fees (flat + %), or undefined if none. */
     private concessionAnnualDisplayForReceipt(student: any, feeStructure: any | null, session: any): number | undefined {
         if (!feeStructure || !student || !session) return undefined;
@@ -112,6 +127,15 @@ class FeeService {
             const t = (x.type || '').toString().toLowerCase();
             return t === 'one-time' || t === 'one_time' || t === 'one time';
         });
+
+        const transport = await this.resolveTransportMonthlyFee(student);
+        if (transport.amount > 0) {
+            monthlyItems.push({
+                title: transport.title || 'Transport Fee',
+                amount: transport.amount,
+                type: 'monthly',
+            });
+        }
 
         const monthlyTotal = monthlyItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
         const oneTimeTotal = oneTimeItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
@@ -262,7 +286,11 @@ class FeeService {
         return true;
     }
 
-    async getStructurePrintPdf(schoolId: string, structureId: string): Promise<Buffer> {
+    async getStructurePrintPdf(
+        schoolId: string,
+        structureId: string,
+        transportDestinationId?: string | null
+    ): Promise<Buffer> {
         const structure = await FeeStructureRepository.findById(structureId);
         if (!structure || structure.schoolId.toString() !== schoolId) {
             throw new ErrorResponse('Fee structure not found', 404);
@@ -270,7 +298,25 @@ class FeeService {
         const school = await SchoolRepository.findById(schoolId);
         const session = await SessionRepository.findActive(schoolId);
         if (!school || !session) throw new ErrorResponse('School or session not found', 404);
-        return await generateFeeStructurePDF({ school, session, structure });
+
+        // Include transport monthly fee in printable totals/splits.
+        // If destination is explicitly passed (and not "none"), use that.
+        // If not passed, keep backward compatibility by using first active destination.
+        let selected: any = null;
+        if (transportDestinationId && transportDestinationId !== 'none') {
+            const byId = await TransportDestinationRepository.findById(transportDestinationId);
+            if (byId && String((byId as any).schoolId) === schoolId) selected = byId;
+        } else if (!transportDestinationId) {
+            const destinations = await TransportDestinationRepository.findBySchool(schoolId);
+            selected = destinations.length > 0 ? destinations[0] : null;
+        }
+        return await generateFeeStructurePDF({
+            school,
+            session,
+            structure,
+            transportDestinationName: selected?.destinationName,
+            transportMonthlyFee: selected?.monthlyFee,
+        });
     }
 
     /**
@@ -284,28 +330,52 @@ class FeeService {
         if (!student || student.schoolId.toString() !== schoolId) {
             throw new ErrorResponse('Student not found', 404);
         }
-        let totalYearly = student.totalYearlyFee ?? 0;
-        if (totalYearly === 0 && student.class) {
+        const session = await SessionRepository.findActive(schoolId);
+        if (!session) throw new ErrorResponse('No active session', 400);
+
+        const previousPaid = Number(student.paidAmount) || 0;
+        let totalYearly = Number(student.totalYearlyFee) || 0;
+        if (student.class) {
             const structure = await FeeStructureRepository.findByClass(
                 schoolId,
-                (await SessionRepository.findActive(schoolId))?._id?.toString() || '',
+                session._id.toString(),
                 student.class
             );
             if (structure) {
-                totalYearly = structure.totalAmount ?? structure.totalAnnualFee ?? 0;
+                const rawItems: Array<{ amount: number; type?: string }> =
+                    (structure as any).components && (structure as any).components.length > 0
+                        ? (structure as any).components
+                        : ((structure as any).fees || []).map((f: any) => ({
+                              amount: f.amount,
+                              type: f.type,
+                          }));
+                let monthlyTotal = 0;
+                let oneTimeTotal = 0;
+                for (const item of rawItems) {
+                    if (!item || typeof item.amount !== 'number') continue;
+                    const t = (item.type || '').toString().toLowerCase();
+                    if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
+                    else if (t === 'monthly') monthlyTotal += item.amount;
+                }
+                const transport = await this.resolveTransportMonthlyFee(student);
+                if (transport.amount > 0) monthlyTotal += transport.amount;
+
+                const sessionMonthCount = this.getSessionYearMonths(session).length || 12;
+                const annualRecurring = monthlyTotal * sessionMonthCount;
+                const concession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
+                const adjustedAnnualRecurring = Math.max(0, annualRecurring - concession);
+                totalYearly = adjustedAnnualRecurring + oneTimeTotal;
+                const recomputedDue = Math.max(0, totalYearly - previousPaid);
+
                 await StudentRepository.update(payload.studentId, {
                     totalYearlyFee: totalYearly,
-                    dueAmount: totalYearly - (student.paidAmount ?? 0),
+                    dueAmount: recomputedDue,
                 } as any);
             }
         }
-        const previousPaid = student.paidAmount ?? 0;
-        const dueBefore = (student as any).dueAmount ?? totalYearly - previousPaid;
+        const dueBefore = Math.max(0, totalYearly - previousPaid);
         if (payload.amountPaid <= 0) throw new ErrorResponse('Invalid payment amount', 400);
         if (payload.amountPaid > dueBefore) throw new ErrorResponse('Payment exceeds remaining due', 400);
-
-        const session = await SessionRepository.findActive(schoolId);
-        if (!session) throw new ErrorResponse('No active session', 400);
         const yearPrefix = session.sessionYear ? session.sessionYear.split('-')[0] : String(new Date().getFullYear());
         const receiptNumber = await FeePaymentRepository.getNextReceiptNumber(schoolId, yearPrefix);
 
@@ -394,6 +464,14 @@ class FeeService {
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * 12,
                 }));
+                const transport = await this.resolveTransportMonthlyFee(student);
+                if (transport.amount > 0) {
+                    if (!feeComponents) feeComponents = [];
+                    feeComponents.push({
+                        name: transport.title || 'Transport Fee',
+                        amount: transport.amount * 12,
+                    });
+                }
             }
         }
         const concessionAnnualDisplay = this.concessionAnnualDisplayForReceipt(
@@ -504,6 +582,9 @@ class FeeService {
                         }
                     }
 
+                    const transport = await this.resolveTransportMonthlyFee(student);
+                    if (transport.amount > 0) monthlyTotal += transport.amount;
+
                     // Apply student-level concession so the Collect Fee modal
                     // shows the correct per-month amount for this student.
                     const sessionMonthCount = session
@@ -575,6 +656,14 @@ class FeeService {
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * 12,
                 }));
+                const transport = await this.resolveTransportMonthlyFee(student);
+                if (transport.amount > 0) {
+                    if (!feeComponents) feeComponents = [];
+                    feeComponents.push({
+                        name: transport.title || 'Transport Fee',
+                        amount: transport.amount * 12,
+                    });
+                }
             }
         }
         const concessionAnnualDisplay = session
@@ -900,6 +989,9 @@ class FeeService {
                         monthlyTotal += item.amount;
                     }
                 }
+
+                const transport = await this.resolveTransportMonthlyFee(student);
+                if (transport.amount > 0) monthlyTotal += transport.amount;
 
                 // Apply concession on recurring fees only (flat + % of annual monthly total).
                 const sessionMonthCount = this.getSessionYearMonths(session).length || 12;

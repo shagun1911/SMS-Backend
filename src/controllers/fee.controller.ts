@@ -234,7 +234,14 @@ class FeeController {
     // GET Fee structure PDF (query: preview=1 for inline display, else download)
     async printStructure(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const buffer = await FeeService.getStructurePrintPdf(req.schoolId!, req.params.id);
+            const rawDestination = req.query.transportDestinationId;
+            const transportDestinationId =
+                typeof rawDestination === 'string' ? rawDestination.trim() : undefined;
+            const buffer = await FeeService.getStructurePrintPdf(
+                req.schoolId!,
+                req.params.id,
+                transportDestinationId || undefined
+            );
             res.setHeader('Content-Type', 'application/pdf');
             const isPreview = req.query.preview === '1' || req.query.preview === 'true';
             res.setHeader(

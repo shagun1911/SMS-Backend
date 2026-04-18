@@ -13,6 +13,8 @@ export interface FeeStructurePDFOptions {
     session: ISession;
     structure: IFeeStructure;
     logoUrl?: string | null;
+    transportDestinationName?: string;
+    transportMonthlyFee?: number;
 }
 
 function money(n: number): string {
@@ -30,7 +32,7 @@ function hLine(doc: any, y: number, color = '#bdbdbd', lw = 0.5) {
 }
 
 export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Promise<Buffer> {
-    const { school, session, structure } = opts;
+    const { school, session, structure, transportDestinationName, transportMonthlyFee } = opts;
 
     const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
     const chunks: Buffer[] = [];
@@ -80,19 +82,27 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     ]);
 
     const sessionLabel = session?.sessionYear || '—';
-    const items = (structure.components && structure.components.length > 0)
+    const baseItems = (structure.components && structure.components.length > 0)
         ? structure.components
         : (structure.fees || []).map((f: any) => ({
             name: f.title || f.name,
             amount: f.amount,
             type: f.type === 'one-time' ? 'one-time' : 'monthly',
         }));
+    const items = [...baseItems];
+    const transportFee = Math.max(0, Number(transportMonthlyFee) || 0);
+    if (transportFee > 0) {
+        items.push({
+            name: transportDestinationName ? `Transport - ${transportDestinationName}` : 'Transport Fee',
+            amount: transportFee,
+            type: 'monthly',
+        } as any);
+    }
 
     const getAnnual = (item: { amount: number; type?: string }) =>
         item.type === 'one-time' ? item.amount : item.amount * 12;
 
-    const totalAnnual = structure.totalAmount ?? structure.totalAnnualFee
-        ?? items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
+    const totalAnnual = items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
 
     // Payment schedule must be based only on recurring monthly components.
     // Exclude one-time components from Monthly/Quarterly/Half-Yearly/Yearly calculations.

@@ -19,6 +19,13 @@ import {
 } from '../utils/studentUsername';
 
 class StudentService {
+    private async resolveTransportMonthlyFee(student: any): Promise<number> {
+        if (!student?.usesTransport || !student?.transportDestinationId) return 0;
+        const destination = await TransportDestinationRepository.findById(
+            String(student.transportDestinationId)
+        );
+        return destination ? Number(destination.monthlyFee) || 0 : 0;
+    }
     /**
      * Helper function to get session months
      */
@@ -368,7 +375,78 @@ class StudentService {
         }
 
         const updatedStudent = await StudentRepository.update(id, data);
-        return updatedStudent!;
+        if (!updatedStudent) {
+            throw new ErrorResponse('Student not found', 404);
+        }
+
+        // Keep yearly total / due in sync when fee-impacting fields change.
+        const feeFieldsChanged = [
+            'class',
+            'usesTransport',
+            'transportDestinationId',
+            'concessionAmount',
+            'concessionPercent',
+        ].some((k) => Object.prototype.hasOwnProperty.call(data, k));
+
+        if (feeFieldsChanged && updatedStudent.class) {
+            const activeSession = await SessionRepository.findActive(schoolId);
+            if (activeSession) {
+                let structure = await FeeStructureRepository.findByClass(
+                    schoolId,
+                    activeSession._id.toString(),
+                    updatedStudent.class
+                );
+                if (!structure && typeof updatedStudent.class === 'string' && updatedStudent.class.includes(' ')) {
+                    structure = await FeeStructureRepository.findByClass(
+                        schoolId,
+                        activeSession._id.toString(),
+                        updatedStudent.class.split(' ')[0]
+                    );
+                }
+                if (structure) {
+                    const rawItems: Array<{ amount: number; type?: string }> =
+                        (structure as any).components && (structure as any).components.length > 0
+                            ? (structure as any).components
+                            : ((structure as any).fees || []).map((f: any) => ({
+                                  amount: f.amount,
+                                  type: f.type,
+                              }));
+
+                    let monthlyTotal = 0;
+                    let oneTimeTotal = 0;
+                    for (const item of rawItems) {
+                        if (!item || typeof item.amount !== 'number') continue;
+                        const t = (item.type || '').toString().toLowerCase();
+                        if (t === 'one-time' || t === 'one_time' || t === 'one time') oneTimeTotal += item.amount;
+                        else if (t === 'monthly') monthlyTotal += item.amount;
+                    }
+
+                    const transportMonthlyFee = await this.resolveTransportMonthlyFee(updatedStudent);
+                    monthlyTotal += transportMonthlyFee;
+
+                    const sessionMonths = this.getSessionYearMonths(activeSession).length || 12;
+                    const annualRecurring = monthlyTotal * sessionMonths;
+                    const flatConcession = Math.max(0, Math.round(Number((updatedStudent as any).concessionAmount) || 0));
+                    const pctConcession = Math.min(
+                        100,
+                        Math.max(0, Number((updatedStudent as any).concessionPercent) || 0)
+                    );
+                    const fromPct = pctConcession > 0 ? Math.round((annualRecurring * pctConcession) / 100) : 0;
+                    const concession = Math.min(annualRecurring, flatConcession + fromPct);
+                    const adjustedAnnualRecurring = Math.max(0, annualRecurring - concession);
+
+                    const totalYearlyFee = adjustedAnnualRecurring + oneTimeTotal;
+                    const paidAmount = Number((updatedStudent as any).paidAmount) || 0;
+                    const dueAmount = Math.max(0, totalYearlyFee - paidAmount);
+
+                    await StudentRepository.update(id, {
+                        totalYearlyFee,
+                        dueAmount,
+                    } as any);
+                }
+            }
+        }
+        return (await StudentRepository.findById(id)) as IStudent;
     }
 
     /**

@@ -230,7 +230,7 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
         { label: '(+) Additional / Late Fee', value: lateFee, fg: '#ea580c', bg: '#ffedd5', bold: false },
         { label: '(-) Concession / Discount', value: concessionValueForRow, fg: '#15803d', bg: '#dcfce7', bold: false },
         { label: 'NET FEE', value: netFee, fg: '#ffffff', bg: '#4f46e5', bold: true },
-        ...(previousPaid > 0 ? [{ label: '(+) Paid at Admission', value: previousPaid, fg: '#15803d', bg: '#dcfce7', bold: false }] : []),
+        ...(previousPaid > 0 ? [{ label: '(+) Amount Paid Earlier', value: previousPaid, fg: '#15803d', bg: '#dcfce7', bold: false }] : []),
         { label: previousPaid > 0 ? 'AMOUNT RECEIVED (This Payment)' : 'AMOUNT RECEIVED', value: thisPayment, fg: '#ffffff', bg: '#16a34a', bold: true },
         ...(previousPaid > 0 ? [{ label: 'TOTAL PAID TO DATE', value: previousPaid + thisPayment, fg: '#ffffff', bg: '#15803d', bold: true }] : []),
         { label: 'BALANCE DUE', value: balance, fg: '#ffffff', bg: balance > 0 ? '#b91c1c' : '#15803d', bold: true },
