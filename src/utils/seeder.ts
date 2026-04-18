@@ -84,9 +84,9 @@ export const seedSystem = async () => {
                 board: Board.CBSE,
                 address: {
                     street: '123, Education Hub',
-                    city: 'Jaipur',
+                    city: 'Bikaner',
                     state: 'Rajasthan',
-                    pincode: '302001',
+                    pincode: '334402',
                     country: 'India'
                 },
                 classRange: { from: 'Nursery', to: '12th' },

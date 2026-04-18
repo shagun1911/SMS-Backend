@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { protect, authorize, multitenant, requireTransportView } from '../middleware/auth.middleware';
 import TransportController from '../controllers/transport.controller';
+import TransportDestinationController from '../controllers/transportDestination.controller';
 import { UserRole } from '../types';
 
 const router = Router();
@@ -22,5 +23,11 @@ router.post('/', canManageTransport, TransportController.addVehicle);
 router.put('/:busId', canManageTransport, TransportController.updateVehicle);
 router.post('/:busId/students', canManageTransport, TransportController.assignStudentsToBus);
 router.delete('/:busId/students', canManageTransport, TransportController.unassignStudentsFromBus);
+
+// Transport Destinations routes
+router.get('/destinations', canManageTransport, TransportDestinationController.getDestinations);
+router.post('/destinations', canManageTransport, TransportDestinationController.createDestination);
+router.put('/destinations/:id', canManageTransport, TransportDestinationController.updateDestination);
+router.delete('/destinations/:id', canManageTransport, TransportDestinationController.deleteDestination);
 
 export default router;

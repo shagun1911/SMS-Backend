@@ -143,6 +143,10 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             type: Boolean,
             default: false,
         },
+        transportDestinationId: {
+            type: Schema.Types.ObjectId,
+            ref: 'TransportDestination',
+        },
         busId: {
             type: Schema.Types.ObjectId,
             ref: 'Bus',

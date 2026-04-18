@@ -2,10 +2,15 @@ import { IStudent, StudentStatus } from '../types';
 import StudentRepository from '../repositories/student.repository';
 import SchoolRepository from '../repositories/school.repository';
 import SessionRepository from '../repositories/session.repository';
+import FeeStructureRepository from '../repositories/feeStructure.repository';
+import StudentFeeRepository from '../repositories/studentFee.repository';
+import TransportDestinationRepository from '../repositories/transportDestination.repository';
 import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
 import { getTenantFilter } from '../utils/tenant';
 import { updateUsageForSchool } from './usage.service';
+import { Types } from 'mongoose';
+import { FeeStatus } from '../types';
 import {
     buildStudentUsernameBase,
     ensureUniqueStudentUsername,
@@ -14,6 +19,139 @@ import {
 } from '../utils/studentUsername';
 
 class StudentService {
+    /**
+     * Helper function to get session months
+     */
+    private getSessionYearMonths(session: any): Array<{ year: number; month: number; monthName: string }> {
+        const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const start = new Date(session.startDate);
+        const end = new Date(session.endDate);
+        const result: Array<{ year: number; month: number; monthName: string }> = [];
+
+        let y = start.getFullYear();
+        let m = start.getMonth() + 1;
+        while (y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) {
+            result.push({ year: y, month: m, monthName: MONTHS[m - 1] });
+            m++;
+            if (m > 12) {
+                m = 1;
+                y++;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Helper function to create fee ledger entries for a student
+     */
+    private async ensureStudentFeeLedger(schoolId: string, student: any, session: any, structure: any): Promise<void> {
+        const rawItems: Array<{ title?: string; name?: string; amount: number; type?: string }> =
+            (structure as any).components && (structure as any).components.length > 0
+                ? (structure as any).components
+                : ((structure as any).fees || []).map((f: any) => ({
+                      title: f.title,
+                      amount: f.amount,
+                      type: f.type,
+                  }));
+
+        const monthlyItems = rawItems.filter((x: any) => (x.type || '').toString().toLowerCase() === 'monthly');
+        const oneTimeItems = rawItems.filter((x: any) => {
+            const t = (x.type || '').toString().toLowerCase();
+            return t === 'one-time' || t === 'one_time' || t === 'one time';
+        });
+
+        // Add transport fee if student uses transport
+        let transportMonthlyFee = 0;
+        if (student.usesTransport && student.transportDestinationId) {
+            const transportDestination = await TransportDestinationRepository.findById(student.transportDestinationId.toString());
+            if (transportDestination) {
+                transportMonthlyFee = transportDestination.monthlyFee || 0;
+                // Add transport as a monthly item
+                monthlyItems.push({
+                    title: `Transport - ${transportDestination.destinationName}`,
+                    amount: transportMonthlyFee,
+                    type: 'monthly',
+                });
+            }
+        }
+
+        const monthlyTotal = monthlyItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
+        const oneTimeTotal = oneTimeItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
+
+        const months = this.getSessionYearMonths(session);
+        const sessionMonthCount = months.length || 12;
+
+        const annualRecurring = monthlyTotal * sessionMonthCount;
+        const flatConcession = Math.max(0, Math.round(Number(student?.concessionAmount) || 0));
+        const pctConcession = Math.min(100, Math.max(0, Number(student?.concessionPercent) || 0));
+        const fromPct = pctConcession > 0 ? Math.round((annualRecurring * pctConcession) / 100) : 0;
+        const concession = Math.min(annualRecurring, flatConcession + fromPct);
+
+        const annualMonthlyAfter = concession > 0 && monthlyTotal > 0
+            ? Math.max(0, annualRecurring - concession)
+            : annualRecurring;
+
+        const annualMonthlyAfterInt = Math.round(annualMonthlyAfter);
+        const basePerMonth = sessionMonthCount > 0
+            ? Math.floor(annualMonthlyAfterInt / sessionMonthCount)
+            : annualMonthlyAfterInt;
+        const remainder = sessionMonthCount > 0
+            ? annualMonthlyAfterInt - (basePerMonth * sessionMonthCount)
+            : 0;
+
+        let idx = 0;
+        for (const m of months) {
+            const adjustedMonthlyPerMonth = idx < remainder ? basePerMonth + 1 : basePerMonth;
+            idx++;
+            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
+            if (existing) continue;
+            await StudentFeeRepository.create({
+                schoolId: new Types.ObjectId(schoolId) as any,
+                studentId: student._id,
+                sessionId: session._id,
+                month: m.monthName,
+                feeBreakdown: monthlyItems.map((f: any) => ({
+                    title: f.title || f.name || 'Monthly Fee',
+                    amount: Number(f.amount) || 0,
+                    type: 'monthly',
+                })),
+                totalAmount: adjustedMonthlyPerMonth,
+                paidAmount: 0,
+                remainingAmount: adjustedMonthlyPerMonth,
+                status: FeeStatus.PENDING,
+                dueDate: new Date(m.year, m.month, 0, 23, 59, 59),
+                payments: [],
+                discount: 0,
+                lateFee: 0,
+            } as any);
+        }
+
+        if (oneTimeTotal > 0) {
+            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), 'One-Time');
+            if (!existing) {
+                await StudentFeeRepository.create({
+                    schoolId: new Types.ObjectId(schoolId) as any,
+                    studentId: student._id,
+                    sessionId: session._id,
+                    month: 'One-Time',
+                    feeBreakdown: oneTimeItems.map((f: any) => ({
+                        title: f.title || f.name || 'One-Time Fee',
+                        amount: Number(f.amount) || 0,
+                        type: 'one-time',
+                    })),
+                    totalAmount: oneTimeTotal,
+                    paidAmount: 0,
+                    remainingAmount: oneTimeTotal,
+                    status: FeeStatus.PENDING,
+                    dueDate: new Date(session.startDate),
+                    payments: [],
+                    discount: 0,
+                    lateFee: 0,
+                } as any);
+            }
+        }
+    }
+
     /**
      * Create a new student with auto-generated admission number
      */
@@ -28,7 +166,13 @@ class StudentService {
             throw new ErrorResponse('School not found', 404);
         }
 
-        const admissionNumber = await this.generateAdmissionNumber(schoolId, school.schoolCode);
+        // Use manual admission number if provided, otherwise auto-generate
+        let admissionNumber: string;
+        if (studentData.admissionNumber && studentData.admissionNumber.trim()) {
+            admissionNumber = studentData.admissionNumber.trim().toUpperCase();
+        } else {
+            admissionNumber = await this.generateAdmissionNumber(schoolId, school.schoolCode);
+        }
 
         // Default password = DOB as DDMMYYYY (e.g. 15082010)
         let defaultPassword = admissionNumber; // fallback
@@ -78,6 +222,66 @@ class StudentService {
                     plainPassword: defaultPassword,
                     mustChangePassword: true,
                 } as any);
+
+                // Set totalYearlyFee from fee structure if available and create fee ledger entries
+                if (student.class) {
+                    const structure = await FeeStructureRepository.findByClass(
+                        schoolId,
+                        activeSession._id.toString(),
+                        student.class
+                    );
+                    if (structure) {
+                        const rawItems: Array<{ amount: number; type?: string }> =
+                            (structure as any).components && (structure as any).components.length > 0
+                                ? (structure as any).components
+                                : ((structure as any).fees || []).map((f: any) => ({
+                                      amount: f.amount,
+                                      type: f.type,
+                                  }));
+
+                        let monthlyTotal = 0;
+                        let oneTimeTotal = 0;
+                        for (const item of rawItems) {
+                            if (!item || typeof item.amount !== 'number') continue;
+                            const t = (item.type || '').toString().toLowerCase();
+                            if (t === 'one-time' || t === 'one_time' || t === 'one time') {
+                                oneTimeTotal += item.amount;
+                            } else if (t === 'monthly') {
+                                monthlyTotal += item.amount;
+                            }
+                        }
+
+                        // Calculate session months (default to 12 if not available)
+                        const sessionMonths = 12;
+                        const annualRecurring = monthlyTotal * sessionMonths;
+                        const totalYearly = annualRecurring + oneTimeTotal;
+
+                        await StudentRepository.update(student._id.toString(), {
+                            totalYearlyFee: totalYearly,
+                            dueAmount: totalYearly,
+                            paidAmount: 0,
+                        } as any);
+
+                        // Create fee ledger entries for the student
+                        await this.ensureStudentFeeLedger(schoolId, student, activeSession, structure);
+
+                        // Recalculate totalYearlyFee including transport fee
+                        let transportMonthlyFee = 0;
+                        if (student.usesTransport && student.transportDestinationId) {
+                            const transportDestination = await TransportDestinationRepository.findById(student.transportDestinationId.toString());
+                            if (transportDestination) {
+                                transportMonthlyFee = transportDestination.monthlyFee || 0;
+                            }
+                        }
+
+                        const totalYearlyWithTransport = totalYearly + (transportMonthlyFee * sessionMonths);
+
+                        await StudentRepository.update(student._id.toString(), {
+                            totalYearlyFee: totalYearlyWithTransport,
+                            dueAmount: totalYearlyWithTransport,
+                        } as any);
+                    }
+                }
 
                 await updateUsageForSchool(schoolId);
                 return student;

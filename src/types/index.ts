@@ -202,6 +202,7 @@ export interface IStudent extends Document {
     status: StudentStatus;
     isActive: boolean;
     usesTransport: boolean;
+    transportDestinationId?: Types.ObjectId;
     busId?: Types.ObjectId;
     totalYearlyFee?: number;
     paidAmount?: number;

@@ -63,7 +63,7 @@ async function drawFrontCard(
     const y = cy;
 
     // Taller blue header: room for school name, session, and address
-    const HEADER_BLUE_H = 74;
+    const HEADER_BLUE_H = 85;
     const BANNER_H = 16;
     const headerBottom = y + HEADER_BLUE_H;
 
@@ -76,40 +76,70 @@ async function drawFrontCard(
     doc.rect(x, y, CARD_W, HEADER_BLUE_H).fill('#1a237e');
     doc.restore();
 
-    // School logo
-    const LOGO_SZ = 36;
+    // School logo (increased size and vertically centered)
+    const LOGO_SZ = 42;
     const logoX = x + M;
-    const logoY = y + 10;
+    const logoY = y + (HEADER_BLUE_H - LOGO_SZ) / 2; // center logo vertically
     if (logoBuf) {
         try { doc.image(logoBuf, logoX, logoY, { width: LOGO_SZ, height: LOGO_SZ }); }
         catch { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
     } else { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
 
-    const textBlockX = x + M + LOGO_SZ + 8;
-    const textBlockW = CARD_W - M * 2 - LOGO_SZ - 8;
+    // Text block
+    const textBlockX = logoX + LOGO_SZ + 8;
+    const textBlockW = CARD_W - (textBlockX - x) - M;
 
-    // Header text order:
-    // 1) School name
-    // 2) Affiliated to CBSE
-    // 3) Address
-    // 4) Session
+    // Start Y (center content block vertically)
+    let textY = y + 10;
+
+    // School Name
     const schoolName = school.schoolName || 'School Name';
-    doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
-    doc.text(schoolName, textBlockX, y + 7, { width: textBlockW, align: 'center' });
+    const nameFontSize = schoolName.length > 35 ? 8 : schoolName.length > 25 ? 9 : 10;
 
+    doc.font('Helvetica-Bold')
+       .fontSize(nameFontSize)
+       .fillColor('#ffffff')
+       .text(schoolName, textBlockX, textY, {
+           width: textBlockW,
+           align: 'center'
+       });
+
+    textY += 18;
+
+    // Affiliation
     const affiliationBoard = String((school as ISchool & { board?: string }).board || 'CBSE').trim();
-    doc.fontSize(6.5).font('Helvetica').fillColor('#bbdefb');
-    doc.text(`Affiliated to ${affiliationBoard}`, textBlockX, y + 20, { width: textBlockW, align: 'center' });
 
+    doc.font('Helvetica')
+       .fontSize(7)
+       .fillColor('#bbdefb')
+       .text(`Affiliated to ${affiliationBoard}`, textBlockX, textY, {
+           width: textBlockW,
+           align: 'center'
+       });
+
+    textY += 10;
+
+    // Address
     const addrLine = formatSchoolAddress(school);
     if (addrLine) {
-        doc.fontSize(5.5).font('Helvetica').fillColor('#e3f2fd');
-        doc.text(addrLine, textBlockX, y + 30, { width: textBlockW, align: 'center', lineGap: 1 });
+        doc.fontSize(6.5)
+           .fillColor('#e3f2fd')
+           .text(addrLine, textBlockX, textY, {
+               width: textBlockW,
+               align: 'center'
+           });
+
+        textY += 12;
     }
 
+    // Session
     if (sessionYear) {
-        doc.fontSize(7).font('Helvetica').fillColor('#bbdefb');
-        doc.text(`Session: ${sessionYear}`, textBlockX, y + 44, { width: textBlockW, align: 'center' });
+        doc.fontSize(7.5)
+           .fillColor('#bbdefb')
+           .text(`Session: ${sessionYear}`, textBlockX, textY, {
+               width: textBlockW,
+               align: 'center'
+           });
     }
 
     // "IDENTITY CARD" banner (below blue header)
