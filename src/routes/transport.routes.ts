@@ -15,19 +15,20 @@ const canManageTransport = authorize(
     UserRole.TRANSPORT_MANAGER
 );
 
+// Literal paths must come before /:busId… or "destinations" can be treated as a bus id (404 on CRUD).
+router.get('/crew-options', canManageTransport, TransportController.getCrewOptions);
+
+router.get('/destinations', canManageTransport, TransportDestinationController.getDestinations);
+router.post('/destinations', canManageTransport, TransportDestinationController.createDestination);
+router.put('/destinations/:id', canManageTransport, TransportDestinationController.updateDestination);
+router.delete('/destinations/:id', canManageTransport, TransportDestinationController.deleteDestination);
+
 // Teachers with view_transport permission can view bus routes (read-only)
 router.get('/', requireTransportView, TransportController.getFleet);
-router.get('/crew-options', canManageTransport, TransportController.getCrewOptions);
 router.get('/:busId/details', requireTransportView, TransportController.getBusDetails);
 router.post('/', canManageTransport, TransportController.addVehicle);
 router.put('/:busId', canManageTransport, TransportController.updateVehicle);
 router.post('/:busId/students', canManageTransport, TransportController.assignStudentsToBus);
 router.delete('/:busId/students', canManageTransport, TransportController.unassignStudentsFromBus);
-
-// Transport Destinations routes
-router.get('/destinations', canManageTransport, TransportDestinationController.getDestinations);
-router.post('/destinations', canManageTransport, TransportDestinationController.createDestination);
-router.put('/destinations/:id', canManageTransport, TransportDestinationController.updateDestination);
-router.delete('/destinations/:id', canManageTransport, TransportDestinationController.deleteDestination);
 
 export default router;
