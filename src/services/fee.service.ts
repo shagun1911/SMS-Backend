@@ -80,7 +80,7 @@ class FeeService {
     private async ensureStudentFeeLedgerForActiveSession(
         schoolId: string,
         student: any,
-        opts?: { session?: any; feeStructure?: any | null }
+        opts?: { session?: any; feeStructure?: any | null; existingFeeKeys?: Set<string> }
     ): Promise<void> {
         const session = opts?.session ?? (await SessionRepository.findActive(schoolId));
         if (!session) return;
@@ -155,11 +155,28 @@ class FeeService {
             ? annualMonthlyAfterInt - (basePerMonth * chargeableCount)
             : 0;
 
+        // Batch-fetch existing fee rows for this student+session to avoid N+1 DB calls
+        let existingMonths: Set<string>;
+        if (opts?.existingFeeKeys) {
+            // Bulk mode: use pre-fetched set from caller (e.g. getDefaulters)
+            existingMonths = new Set(
+                months.map(m => m.monthName).filter(mn => opts.existingFeeKeys!.has(`${student._id}_${mn}`))
+            );
+            // Also check One-Time
+            if (opts.existingFeeKeys.has(`${student._id}_One-Time`)) existingMonths.add('One-Time');
+        } else {
+            const existingFees = await StudentFee.find({
+                schoolId: new Types.ObjectId(schoolId),
+                studentId: student._id,
+                sessionId: session._id,
+            }).select('month').lean();
+            existingMonths = new Set(existingFees.map((f: any) => String(f.month)));
+        }
+
         // Monthly ledger entries (exempt session months: no charge, status exempt)
         let chargeableIdx = 0;
         for (const m of months) {
-            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
-            if (existing) continue;
+            if (existingMonths.has(m.monthName)) continue;
 
             if (exemptCanon.has(m.monthName)) {
                 await StudentFeeRepository.create({
@@ -209,7 +226,7 @@ class FeeService {
 
         // One-time ledger entry (collected at admission)
         if (oneTimeTotal > 0) {
-            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), 'One-Time');
+            const existing = existingMonths.has('One-Time');
             if (!existing) {
                 await StudentFeeRepository.create({
                     schoolId: new Types.ObjectId(schoolId) as any,
@@ -397,17 +414,18 @@ class FeeService {
 
         const previousPaid = Number(student.paidAmount) || 0;
         let totalYearly = Number(student.totalYearlyFee) || 0;
+        let cachedFeeStructure: any = null;
         if (student.class) {
-            const structure = await FeeStructureRepository.findByClass(
+            cachedFeeStructure = await FeeStructureRepository.findByClass(
                 schoolId,
                 session._id.toString(),
                 student.class
             );
-            if (structure) {
+            if (cachedFeeStructure) {
                 const rawItems: Array<{ amount: number; type?: string }> =
-                    (structure as any).components && (structure as any).components.length > 0
-                        ? (structure as any).components
-                        : ((structure as any).fees || []).map((f: any) => ({
+                    (cachedFeeStructure as any).components && (cachedFeeStructure as any).components.length > 0
+                        ? (cachedFeeStructure as any).components
+                        : ((cachedFeeStructure as any).fees || []).map((f: any) => ({
                               amount: f.amount,
                               type: f.type,
                           }));
@@ -424,7 +442,7 @@ class FeeService {
 
                 const sessionMonthsForAnnual = getSessionYearMonths(session);
                 const exemptForAnnual = normalizeFeeExemptMonths(
-                    (structure as any).feeExemptMonths,
+                    (cachedFeeStructure as any).feeExemptMonths,
                     sessionMonthsForAnnual.map((m) => m.monthName)
                 );
                 const chargeableCount = Math.max(
@@ -472,7 +490,9 @@ class FeeService {
         // Allocate the payment into per-month StudentFee ledger records sequentially.
         // This ensures Expected/Pending on the fee management screen reflect reality.
         try {
-            await this.ensureStudentFeeLedgerForActiveSession(schoolId, student);
+            await this.ensureStudentFeeLedgerForActiveSession(schoolId, student, {
+                session,
+            });
             const months = getSessionYearMonths(session);
             let remaining = payload.amountPaid;
             for (const m of months) {
@@ -516,11 +536,8 @@ class FeeService {
         let feeComponents: Array<{ name: string; amount: number }> | undefined;
         let feeStructureForReceipt: any = null;
         if (student.class) {
-            feeStructureForReceipt = await FeeStructureRepository.findByClass(
-                schoolId,
-                session._id.toString(),
-                student.class
-            );
+            // Reuse the structure already loaded above instead of fetching again
+            feeStructureForReceipt = cachedFeeStructure;
             if (feeStructureForReceipt) {
                 const sm = getSessionYearMonths(session);
                 const ex = normalizeFeeExemptMonths(
@@ -696,7 +713,10 @@ class FeeService {
                     monthlyFee = effectiveMonthlyFee > 0 ? effectiveMonthlyFee : undefined;
                     oneTimeFee = oneTimeTotal > 0 ? oneTimeTotal : undefined;
 
-                    await this.ensureStudentFeeLedgerForActiveSession(schoolId, student);
+                    await this.ensureStudentFeeLedgerForActiveSession(schoolId, student, {
+                        session,
+                        feeStructure: structure,
+                    });
                     const feeRows = await StudentFee.find({
                         schoolId: new Types.ObjectId(schoolId),
                         studentId: student._id,
@@ -949,6 +969,16 @@ class FeeService {
             return undefined;
         };
 
+        // Bulk-prefetch all existing fee rows for the entire school+session
+        // so ensureStudentFeeLedgerForActiveSession can skip per-student DB lookups.
+        const allExistingFees = await StudentFee.find({
+            schoolId: schoolObjId,
+            sessionId: activeSession._id,
+        }).select('studentId month').lean();
+        const existingFeeKeys = new Set(
+            allExistingFees.map((f: any) => `${f.studentId}_${f.month}`)
+        );
+
         const LEDGER_ENSURE_CONCURRENCY = 20;
         const withClass = (activeStudents as any[]).filter((s: any) => s?.class);
         for (let i = 0; i < withClass.length; i += LEDGER_ENSURE_CONCURRENCY) {
@@ -958,6 +988,7 @@ class FeeService {
                     this.ensureStudentFeeLedgerForActiveSession(schoolId, s, {
                         session: activeSession,
                         feeStructure: resolveFeeStructureForStudent(s),
+                        existingFeeKeys,
                     }).catch(() => undefined)
                 )
             );
@@ -1402,17 +1433,19 @@ class FeeService {
         let createdCount = 0;
         let skippedCount = 0;
 
+        // Batch-fetch existing fee records for all students in this class+month
+        const studentIds = students.map(s => s._id);
+        const existingFees = await StudentFee.find({
+            schoolId: new Types.ObjectId(schoolId),
+            sessionId: session._id,
+            month,
+            studentId: { $in: studentIds },
+        }).select('studentId').lean();
+        const existingStudentIds = new Set(existingFees.map((f: any) => f.studentId.toString()));
+
         // 3. Create Fee Records
         for (const student of students) {
-            // Check if already exists
-            const existing = await StudentFeeRepository.findByStudentMonth(
-                schoolId,
-                student._id.toString(),
-                session._id.toString(),
-                month
-            );
-
-            if (existing) {
+            if (existingStudentIds.has(student._id.toString())) {
                 skippedCount++;
                 continue;
             }
@@ -1534,7 +1567,8 @@ class FeeService {
         return await StudentFee.find(filter)
             .populate('studentId', 'firstName lastName admissionNumber photo')
             .populate('sessionId', 'name')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean() as IStudentFee[];
     }
 
     /**
@@ -1677,19 +1711,16 @@ class FeeService {
             ]),
             Student.countDocuments({ schoolId: schoolObjId, isActive: true, dueAmount: { $gt: 0 } }),
             FeePayment.countDocuments({ schoolId: schoolObjId }),
-            (async () => {
-                const payments = await FeePayment.find({ schoolId: schoolObjId }).lean();
-                const byMonth: Record<string, number> = {};
-                payments.forEach((p: any) => {
-                    const d = new Date(p.paymentDate);
-                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    byMonth[key] = (byMonth[key] || 0) + (p.amountPaid || 0);
-                });
-                return Object.entries(byMonth)
-                    .sort((a, b) => a[0].localeCompare(b[0]))
-                    .slice(-12)
-                    .map(([month, amount]) => ({ month, amount }));
-            })(),
+            // Use aggregation pipeline instead of loading all payments into memory
+            FeePayment.aggregate([
+                { $match: { schoolId: schoolObjId } },
+                { $group: {
+                    _id: { $dateToString: { format: '%Y-%m', date: '$paymentDate' } },
+                    amount: { $sum: '$amountPaid' },
+                }},
+                { $sort: { _id: 1 } },
+                { $project: { _id: 0, month: '$_id', amount: 1 } },
+            ]).then((results: any[]) => results.slice(-12)),
         ]);
         const yearlyCollectedTotal = yearlyCollected[0]?.total ?? 0;
         const yearlyPendingTotal = yearlyPending[0]?.total ?? 0;

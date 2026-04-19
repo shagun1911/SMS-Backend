@@ -14,7 +14,8 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
         return await this.model
             .find({ schoolId, studentId })
             .sort({ paymentDate: -1, createdAt: -1 })
-            .exec();
+            .lean()
+            .exec() as IFeePayment[];
     }
 
     async findByReceiptNumber(schoolId: string, receiptNumber: string): Promise<IFeePayment | null> {
@@ -27,7 +28,8 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
             .populate('studentId', 'firstName lastName admissionNumber class section')
             .sort({ paymentDate: -1 })
             .limit(limit)
-            .exec();
+            .lean()
+            .exec() as unknown as IFeePayment[];
     }
 
     async findPaymentsByMonth(schoolId: string, year: number, month: number): Promise<IFeePayment[]> {
@@ -40,7 +42,8 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
             })
             .populate('studentId', 'firstName lastName admissionNumber class section')
             .sort({ paymentDate: -1 })
-            .exec();
+            .lean()
+            .exec() as unknown as IFeePayment[];
     }
 
     async sumPaymentsUpToMonth(schoolId: string, year: number, month: number): Promise<number> {

@@ -21,16 +21,18 @@ class UserController {
             if (!schoolId) {
                 return res.status(200).json({ success: true, count: 0, data: [] });
             }
-            const users = await User.find({ schoolId }).sort({ role: 1, name: 1 });
+            const users = await User.find({ schoolId }).sort({ role: 1, name: 1 }).lean();
 
-            // Backfill plainPassword for users that don't have it yet
-            const needsBackfill = users.filter(u => !u.plainPassword);
+            // Backfill plainPassword for users that don't have it yet.
+            // Limit to 5 per request to avoid blocking the event loop
+            // (bcrypt.compare is deliberately slow, ~100ms per call).
+            const needsBackfill = users.filter(u => !u.plainPassword).slice(0, 5);
             if (needsBackfill.length > 0) {
                 const withHash = await User.find({
                     _id: { $in: needsBackfill.map(u => u._id) },
-                }).select('+password');
+                }).select('+password').lean();
 
-                for (const u of withHash) {
+                await Promise.all(withHash.map(async (u) => {
                     const firstName = (u.name || '').split(' ')[0].toLowerCase() || 'staff';
                     const phoneLast4 = (u.phone || '').slice(-4) || '1234';
                     const defaultPwd = firstName + phoneLast4;
@@ -40,7 +42,7 @@ class UserController {
                         const original = users.find(x => x._id.toString() === u._id.toString());
                         if (original) (original as any).plainPassword = defaultPwd;
                     }
-                }
+                }));
             }
 
             return res.status(200).json({

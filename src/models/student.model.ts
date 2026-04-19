@@ -187,6 +187,8 @@ studentSchema.index({ username: 1 }, { unique: true, sparse: true });
 studentSchema.index({ schoolId: 1, class: 1, section: 1 });
 // Optimize active student queries
 studentSchema.index({ schoolId: 1, status: 1 });
+// Optimize dashboard/fee stats: active students with due amounts
+studentSchema.index({ schoolId: 1, isActive: 1, dueAmount: 1 });
 
 // Virtual for full name
 studentSchema.virtual('fullName').get(function (this: HydratedDocument<IStudent>) {

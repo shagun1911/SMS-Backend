@@ -7,6 +7,7 @@ import StudentFeeRepository from '../repositories/studentFee.repository';
 import TransportDestinationRepository from '../repositories/transportDestination.repository';
 import ErrorResponse from '../utils/errorResponse';
 import Student from '../models/student.model';
+import StudentFee from '../models/studentFee.model';
 import { getTenantFilter } from '../utils/tenant';
 import { updateUsageForSchool } from './usage.service';
 import { Types } from 'mongoose';
@@ -94,10 +95,17 @@ class StudentService {
             ? annualMonthlyAfterInt - (basePerMonth * chargeableCount)
             : 0;
 
+        // Batch-fetch all existing fee rows for this student+session to avoid N+1 DB calls
+        const existingFees = await StudentFee.find({
+            schoolId: new Types.ObjectId(schoolId),
+            studentId: student._id,
+            sessionId: session._id,
+        }).select('month').lean();
+        const existingMonths = new Set(existingFees.map((f: any) => String(f.month)));
+
         let chargeableIdx = 0;
         for (const m of months) {
-            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), m.monthName);
-            if (existing) continue;
+            if (existingMonths.has(m.monthName)) continue;
 
             if (exemptCanon.has(m.monthName)) {
                 await StudentFeeRepository.create({
@@ -146,8 +154,7 @@ class StudentService {
         }
 
         if (oneTimeTotal > 0) {
-            const existing = await StudentFeeRepository.findByStudentMonth(schoolId, student._id.toString(), session._id.toString(), 'One-Time');
-            if (!existing) {
+            if (!existingMonths.has('One-Time')) {
                 await StudentFeeRepository.create({
                     schoolId: new Types.ObjectId(schoolId) as any,
                     studentId: student._id,
@@ -338,12 +345,14 @@ class StudentService {
             ];
         }
 
-        const result = await Student.find(filter)
-            .sort({ class: 1, section: 1, rollNumber: 1 })
-            .skip(skip)
-            .limit(limit);
-
-        const total = await Student.countDocuments(filter);
+        const [result, total] = await Promise.all([
+            Student.find(filter)
+                .sort({ class: 1, section: 1, rollNumber: 1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            Student.countDocuments(filter),
+        ]);
 
         return {
             students: result,

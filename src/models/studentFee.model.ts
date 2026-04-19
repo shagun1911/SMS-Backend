@@ -97,6 +97,12 @@ const studentFeeSchema = new Schema<IStudentFee, IStudentFeeModel>(
 studentFeeSchema.index({ schoolId: 1, status: 1 });
 // Ensure unique monthly/fee record per student
 studentFeeSchema.index({ schoolId: 1, studentId: 1, sessionId: 1, month: 1 }, { unique: true });
+// Optimize getDefaulters and monthly fee queries
+studentFeeSchema.index({ schoolId: 1, sessionId: 1, month: 1 });
+// Optimize defaulter previousRows query (dueDate range)
+studentFeeSchema.index({ schoolId: 1, sessionId: 1, dueDate: 1 });
+// Optimize receipt-to-month resolution
+studentFeeSchema.index({ schoolId: 1, 'payments.receiptNumber': 1 });
 
 // Pre-save hook to calculate remaining amount & update status
 studentFeeSchema.pre('save', function (next) {
