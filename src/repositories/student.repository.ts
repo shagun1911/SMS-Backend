@@ -8,7 +8,7 @@ class StudentRepository extends BaseRepository<IStudent> {
     }
 
     async findByAdmissionNumber(schoolId: string, admissionNumber: string): Promise<IStudent | null> {
-        return await this.model.findOne({ schoolId, admissionNumber }).lean().exec() as IStudent | null;
+        return await this.model.findOne({ schoolId, admissionNumber }).lean().exec() as unknown as IStudent | null;
     }
 
     async findActiveStudents(schoolId: string): Promise<IStudent[]> {

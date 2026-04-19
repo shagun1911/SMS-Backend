@@ -350,7 +350,7 @@ class StudentService {
                 .sort({ class: 1, section: 1, rollNumber: 1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(),
+                .lean().exec() as unknown as IStudent[],
             Student.countDocuments(filter),
         ]);
 

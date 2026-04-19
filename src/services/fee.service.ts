@@ -1568,7 +1568,7 @@ class FeeService {
             .populate('studentId', 'firstName lastName admissionNumber photo')
             .populate('sessionId', 'name')
             .sort({ createdAt: -1 })
-            .lean() as IStudentFee[];
+            .lean().exec() as unknown as IStudentFee[];
     }
 
     /**

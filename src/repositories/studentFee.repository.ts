@@ -16,7 +16,7 @@ class StudentFeeRepository extends BaseRepository<IStudentFee> {
             schoolId,
             studentId,
             sessionId
-        }).sort({ month: 1 }).lean();
+        }).sort({ month: 1 }).lean().exec() as unknown as IStudentFee[];
     }
 
     async findPending(
@@ -27,7 +27,7 @@ class StudentFeeRepository extends BaseRepository<IStudentFee> {
             schoolId,
             sessionId,
             status: { $in: [FeeStatus.PENDING, FeeStatus.PARTIAL, FeeStatus.OVERDUE] },
-        }).lean();
+        }).lean().exec() as unknown as IStudentFee[];
     }
 
     async findByMonth(
@@ -35,7 +35,7 @@ class StudentFeeRepository extends BaseRepository<IStudentFee> {
         sessionId: string,
         month: string
     ): Promise<IStudentFee[]> {
-        return await this.model.find({ schoolId, sessionId, month }).lean();
+        return await this.model.find({ schoolId, sessionId, month }).lean().exec() as unknown as IStudentFee[];
     }
 
     async findByStudentMonth(

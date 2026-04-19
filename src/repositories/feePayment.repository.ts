@@ -15,7 +15,7 @@ class FeePaymentRepository extends BaseRepository<IFeePayment> {
             .find({ schoolId, studentId })
             .sort({ paymentDate: -1, createdAt: -1 })
             .lean()
-            .exec() as IFeePayment[];
+            .exec() as unknown as IFeePayment[];
     }
 
     async findByReceiptNumber(schoolId: string, receiptNumber: string): Promise<IFeePayment | null> {
