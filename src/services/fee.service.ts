@@ -77,18 +77,26 @@ class FeeService {
         return total > 0 ? total : undefined;
     }
 
-    private async ensureStudentFeeLedgerForActiveSession(schoolId: string, student: any): Promise<void> {
-        const session = await SessionRepository.findActive(schoolId);
+    private async ensureStudentFeeLedgerForActiveSession(
+        schoolId: string,
+        student: any,
+        opts?: { session?: any; feeStructure?: any | null }
+    ): Promise<void> {
+        const session = opts?.session ?? (await SessionRepository.findActive(schoolId));
         if (!session) return;
         if (!student?.class) return;
 
-        let structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
-        if (!structure && typeof student.class === 'string' && student.class.includes(' ')) {
-            structure = await FeeStructureRepository.findByClass(
-                schoolId,
-                session._id.toString(),
-                student.class.split(' ')[0]
-            );
+        let structure =
+            opts?.feeStructure !== undefined ? opts.feeStructure : undefined;
+        if (structure === undefined) {
+            structure = await FeeStructureRepository.findByClass(schoolId, session._id.toString(), student.class);
+            if (!structure && typeof student.class === 'string' && student.class.includes(' ')) {
+                structure = await FeeStructureRepository.findByClass(
+                    schoolId,
+                    session._id.toString(),
+                    student.class.split(' ')[0]
+                );
+            }
         }
         if (!structure) return;
 
@@ -909,13 +917,50 @@ class FeeService {
             .select('_id class admissionDate totalYearlyFee concessionAmount concessionPercent firstName lastName fatherName section admissionNumber paidAmount dueAmount')
             .sort({ class: 1, section: 1 })
             .lean();
-        for (const s of activeStudents as any[]) {
-            if (!s?.class) continue;
-            try {
-                await this.ensureStudentFeeLedgerForActiveSession(schoolId, s);
-            } catch (_) {
-                // best effort
+
+        // Prefetch fee structures once per distinct class (same outcome as per-student lookups, fewer DB round-trips).
+        const uniqueClasses = [
+            ...new Set(
+                (activeStudents as any[])
+                    .map((s: any) => (s?.class || '').toString().trim())
+                    .filter(Boolean)
+            ),
+        ];
+        const feeStructureByClass = new Map<string, any | null>();
+        for (const cls of uniqueClasses) {
+            let st = await FeeStructureRepository.findByClass(schoolId, activeSession._id.toString(), cls);
+            if (!st && cls.includes(' ')) {
+                st = await FeeStructureRepository.findByClass(
+                    schoolId,
+                    activeSession._id.toString(),
+                    cls.split(' ')[0]
+                );
             }
+            feeStructureByClass.set(cls, st ?? null);
+        }
+
+        const resolveFeeStructureForStudent = (s: any) => {
+            const cls = (s?.class || '').toString().trim();
+            if (!cls) return undefined;
+            if (feeStructureByClass.has(cls)) return feeStructureByClass.get(cls);
+            if (cls.includes(' ') && feeStructureByClass.has(cls.split(' ')[0])) {
+                return feeStructureByClass.get(cls.split(' ')[0]);
+            }
+            return undefined;
+        };
+
+        const LEDGER_ENSURE_CONCURRENCY = 20;
+        const withClass = (activeStudents as any[]).filter((s: any) => s?.class);
+        for (let i = 0; i < withClass.length; i += LEDGER_ENSURE_CONCURRENCY) {
+            const batch = withClass.slice(i, i + LEDGER_ENSURE_CONCURRENCY);
+            await Promise.all(
+                batch.map((s: any) =>
+                    this.ensureStudentFeeLedgerForActiveSession(schoolId, s, {
+                        session: activeSession,
+                        feeStructure: resolveFeeStructureForStudent(s),
+                    }).catch(() => undefined)
+                )
+            );
         }
 
         // Previous-month arrears are based on monthly fee rows only
