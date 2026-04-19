@@ -245,6 +245,8 @@ export enum FeeStatus {
     PARTIAL = 'partial',
     PAID = 'paid',
     OVERDUE = 'overdue',
+    /** Monthly fee row: session month marked fee-exempt in structure (no charge). */
+    EXEMPT = 'exempt',
 }
 
 export enum PaymentMode {
@@ -270,6 +272,10 @@ export interface IFeeStructure extends Document {
         isOptional: boolean;
     }>;
     components?: Array<{ name: string; amount: number; type?: 'monthly' | 'one-time' }>;
+    /** Full English month names within the session where monthly (incl. transport) fee is not charged. */
+    feeExemptMonths?: string[];
+    /** When set (>0), recurring annual = sum(monthly components) × this; otherwise legacy ×12. */
+    monthlyMultiplier?: number | null;
     totalAnnualFee?: number;
     totalAmount?: number;
     isActive: boolean;

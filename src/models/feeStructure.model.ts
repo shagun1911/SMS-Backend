@@ -52,6 +52,15 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
             type: Number,
             default: 0,
         },
+        feeExemptMonths: {
+            type: [String],
+            default: [],
+        },
+        /** Set when feeExemptMonths is used: recurring annual = monthly × monthlyMultiplier. */
+        monthlyMultiplier: {
+            type: Number,
+            default: undefined,
+        },
         isActive: {
             type: Boolean,
             default: true,
@@ -64,15 +73,19 @@ const feeStructureSchema = new Schema<IFeeStructure, IFeeStructureModel>(
     }
 );
 
-// Helper: annual contribution of one component (monthly → ×12, one-time → as-is)
-function componentAnnualAmount(c: { amount: number; type?: string }): number {
-    return (c.type === 'one-time') ? c.amount : (c.amount * 12);
+// Helper: annual contribution of one component (monthly → ×multiplier, one-time → as-is)
+function componentAnnualAmount(c: { amount: number; type?: string }, mult: number): number {
+    return (c.type === 'one-time') ? c.amount : (c.amount * mult);
 }
 
 // Pre-save hook to calculate total from components or fees
 feeStructureSchema.pre('save', function (next) {
     if (this.components && this.components.length > 0) {
-        const total = this.components.reduce((acc, curr) => acc + componentAnnualAmount(curr), 0);
+        const mult =
+            typeof this.monthlyMultiplier === 'number' && this.monthlyMultiplier > 0
+                ? this.monthlyMultiplier
+                : 12;
+        const total = this.components.reduce((acc, curr) => acc + componentAnnualAmount(curr, mult), 0);
         this.totalAmount = total;
         this.totalAnnualFee = total;
     } else if (this.fees && this.fees.length > 0) {

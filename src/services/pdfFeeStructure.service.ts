@@ -2,6 +2,11 @@
 import PDFDocument from 'pdfkit';
 import { IFeeStructure, ISchool, ISession } from '../types';
 import { fetchImageBuffer } from '../utils/fetchImage';
+import {
+    getSessionYearMonths,
+    normalizeFeeExemptMonths,
+    recurringAnnualMultiplier,
+} from '../utils/feeExemptMonths';
 import fs from 'fs';
 
 const M = 28;
@@ -99,8 +104,15 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
         } as any);
     }
 
+    const sessionMonthsPdf = getSessionYearMonths(session);
+    const exemptCanonPdf = normalizeFeeExemptMonths(
+        (structure as any).feeExemptMonths,
+        sessionMonthsPdf.map((m) => m.monthName)
+    );
+    const mult = recurringAnnualMultiplier(structure as any, sessionMonthsPdf.length, exemptCanonPdf);
+
     const getAnnual = (item: { amount: number; type?: string }) =>
-        item.type === 'one-time' ? item.amount : item.amount * 12;
+        item.type === 'one-time' ? item.amount : item.amount * mult;
 
     const totalAnnual = items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
 
@@ -108,7 +120,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     // Exclude one-time components from Monthly/Quarterly/Half-Yearly/Yearly calculations.
     const recurringAnnual = items
         .filter((i: any) => (i.type || "").toString() !== "one-time")
-        .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0) * 12, 0);
+        .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0) * mult, 0);
     const recurringMonthly = items
         .filter((i: any) => (i.type || "").toString() !== "one-time")
         .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0), 0);
@@ -191,10 +203,23 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
         }
     }
 
-    const dueMonthsText = `${dueMonths.join(', ')}  (${dueMonths.length} Months)`;
+    const billedMonthCount = dueMonths.filter((m) => !exemptCanonPdf.has(m)).length;
+    const dueMonthsText =
+        exemptCanonPdf.size > 0
+            ? `${dueMonths.join(', ')}  (${billedMonthCount} billed, ${exemptCanonPdf.size} fee-exempt)`
+            : `${dueMonths.join(', ')}  (${dueMonths.length} Months)`;
     doc.text(dueMonthsText, M + 86, y + 4, { width: CW - 100 });
     hLine(doc, y + 18, '#9fa8da', 0.5);
     y += 18;
+
+    if (exemptCanonPdf.size > 0) {
+        const labels = [...exemptCanonPdf].join(', ');
+        doc.rect(M, y, CW, 16).fill('#ecfdf5');
+        doc.fontSize(7.5).font(fontBold).fillColor('#047857');
+        doc.text(`Fee exempt (no monthly charge): ${labels}`, M + 8, y + 4, { width: CW - 16 });
+        hLine(doc, y + 16, '#9fa8da', 0.5);
+        y += 16;
+    }
 
     // ── FEE TABLE ─────────────────────────────────────────────────────────────
     y += 6;

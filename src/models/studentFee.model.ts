@@ -100,6 +100,12 @@ studentFeeSchema.index({ schoolId: 1, studentId: 1, sessionId: 1, month: 1 }, { 
 
 // Pre-save hook to calculate remaining amount & update status
 studentFeeSchema.pre('save', function (next) {
+    if (this.status === FeeStatus.EXEMPT) {
+        this.remainingAmount = 0;
+        this.paidAmount = this.paidAmount || 0;
+        return next();
+    }
+
     // Calculate remaining
     const total = this.totalAmount + this.lateFee - this.discount;
     this.remainingAmount = total - this.paidAmount;

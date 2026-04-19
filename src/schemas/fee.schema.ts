@@ -20,6 +20,7 @@ export const createFeeStructureSchema = z.object({
             description: z.string().optional(),
         })).optional(),
         totalAnnualFee: z.number().min(0).optional(),
+        feeExemptMonths: z.array(z.string().min(1)).optional(),
     }).refine((b) => ((b.components?.length ?? 0) >= 1) || ((b.fees?.length ?? 0) >= 1), { message: 'Add at least one fee component or fee item' }),
 });
 
@@ -28,6 +29,7 @@ export const updateFeeStructureSchema = z.object({
         class: z.string().min(1).optional(),
         components: z.array(feeComponentSchema).min(1).optional(),
         totalAmount: z.number().min(0).optional(),
+        feeExemptMonths: z.array(z.string().min(1)).optional(),
     }),
 });
 

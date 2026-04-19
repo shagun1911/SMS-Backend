@@ -26,7 +26,7 @@ class StudentFeeRepository extends BaseRepository<IStudentFee> {
         return await this.model.find({
             schoolId,
             sessionId,
-            status: { $in: [FeeStatus.PENDING, FeeStatus.PARTIAL, FeeStatus.OVERDUE] }
+            status: { $in: [FeeStatus.PENDING, FeeStatus.PARTIAL, FeeStatus.OVERDUE] },
         });
     }
 
