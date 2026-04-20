@@ -62,13 +62,55 @@ async function drawFrontCard(
     const x = cx;
     const y = cy;
 
-    // Taller blue header: room for school name, session, and address
-    const HEADER_BLUE_H = 85;
+    // Blue header height must adapt to long school names/addresses.
+    // Keep a sensible minimum to preserve existing look.
     const BANNER_H = 16;
-    const headerBottom = y + HEADER_BLUE_H;
 
     // Card background with rounded corners
     doc.roundedRect(x, y, CARD_W, CARD_H, 12).lineWidth(2).strokeColor('#1a237e').stroke();
+
+    // ── Header layout pre-calc (dynamic height) ──────────────────────────────
+    const schoolName = school.schoolName || 'School Name';
+    const affiliationBoard = String((school as ISchool & { board?: string }).board || 'CBSE').trim();
+    const addrLine = formatSchoolAddress(school);
+
+    const nameFontSize = schoolName.length > 35 ? 8 : schoolName.length > 25 ? 9 : 10;
+    const affFontSize = 7;
+    const addrFontSize = 6.5;
+    const sessFontSize = 7.5;
+
+    // Reserve a stable logo column; compute remaining width for centered text.
+    const LOGO_SZ = 42;
+    const textBlockX = x + M + LOGO_SZ + 8;
+    const textBlockW = CARD_W - (textBlockX - x) - M;
+
+    const measureTextHeight = (text: string, font: string, fontSize: number) => {
+        if (!text) return 0;
+        doc.font(font).fontSize(fontSize);
+        return doc.heightOfString(text, { width: textBlockW, align: 'center' });
+    };
+
+    const nameH = measureTextHeight(schoolName, 'Helvetica-Bold', nameFontSize);
+    const affH = measureTextHeight(`Affiliated to ${affiliationBoard}`, 'Helvetica', affFontSize);
+    const addrH = addrLine ? measureTextHeight(addrLine, 'Helvetica', addrFontSize) : 0;
+    const sessH = sessionYear ? measureTextHeight(`Session: ${sessionYear}`, 'Helvetica', sessFontSize) : 0;
+
+    const headerPaddingTop = 8;
+    const headerPaddingBottom = 8;
+    const gapAfterName = 3;
+    const gapAfterAff = 2;
+    const gapAfterAddr = addrLine ? 2 : 0;
+    const contentH =
+        nameH +
+        gapAfterName +
+        affH +
+        gapAfterAff +
+        addrH +
+        gapAfterAddr +
+        sessH;
+
+    const HEADER_BLUE_H = Math.max(85, Math.ceil(headerPaddingTop + contentH + headerPaddingBottom));
+    const headerBottom = y + HEADER_BLUE_H;
 
     // Top header band
     doc.save();
@@ -77,7 +119,6 @@ async function drawFrontCard(
     doc.restore();
 
     // School logo (increased size and vertically centered)
-    const LOGO_SZ = 42;
     const logoX = x + M;
     const logoY = y + (HEADER_BLUE_H - LOGO_SZ) / 2; // center logo vertically
     if (logoBuf) {
@@ -85,61 +126,52 @@ async function drawFrontCard(
         catch { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
     } else { logoPlaceholder(doc, logoX, logoY, LOGO_SZ); }
 
-    // Text block
-    const textBlockX = logoX + LOGO_SZ + 8;
-    const textBlockW = CARD_W - (textBlockX - x) - M;
-
-    // Start Y (center content block vertically)
-    let textY = y + 10;
+    // Text block (vertically centered within header)
+    const extraLogoInset = 0;
+    const blockH = contentH;
+    let textY = y + Math.max(headerPaddingTop, (HEADER_BLUE_H - blockH) / 2);
 
     // School Name
-    const schoolName = school.schoolName || 'School Name';
-    const nameFontSize = schoolName.length > 35 ? 8 : schoolName.length > 25 ? 9 : 10;
-
     doc.font('Helvetica-Bold')
-       .fontSize(nameFontSize)
-       .fillColor('#ffffff')
-       .text(schoolName, textBlockX, textY, {
-           width: textBlockW,
-           align: 'center'
-       });
-
-    textY += 18;
+        .fontSize(nameFontSize)
+        .fillColor('#ffffff')
+        .text(schoolName, textBlockX + extraLogoInset, textY, {
+            width: textBlockW,
+            align: 'center',
+        });
+    textY += nameH + gapAfterName;
 
     // Affiliation
-    const affiliationBoard = String((school as ISchool & { board?: string }).board || 'CBSE').trim();
-
     doc.font('Helvetica')
-       .fontSize(7)
-       .fillColor('#bbdefb')
-       .text(`Affiliated to ${affiliationBoard}`, textBlockX, textY, {
-           width: textBlockW,
-           align: 'center'
-       });
-
-    textY += 10;
+        .fontSize(affFontSize)
+        .fillColor('#bbdefb')
+        .text(`Affiliated to ${affiliationBoard}`, textBlockX + extraLogoInset, textY, {
+            width: textBlockW,
+            align: 'center',
+        });
+    textY += affH + gapAfterAff;
 
     // Address
-    const addrLine = formatSchoolAddress(school);
     if (addrLine) {
-        doc.fontSize(6.5)
-           .fillColor('#e3f2fd')
-           .text(addrLine, textBlockX, textY, {
-               width: textBlockW,
-               align: 'center'
-           });
-
-        textY += 12;
+        doc.font('Helvetica')
+            .fontSize(addrFontSize)
+            .fillColor('#e3f2fd')
+            .text(addrLine, textBlockX + extraLogoInset, textY, {
+                width: textBlockW,
+                align: 'center',
+            });
+        textY += addrH + gapAfterAddr;
     }
 
     // Session
     if (sessionYear) {
-        doc.fontSize(7.5)
-           .fillColor('#bbdefb')
-           .text(`Session: ${sessionYear}`, textBlockX, textY, {
-               width: textBlockW,
-               align: 'center'
-           });
+        doc.font('Helvetica')
+            .fontSize(sessFontSize)
+            .fillColor('#bbdefb')
+            .text(`Session: ${sessionYear}`, textBlockX + extraLogoInset, textY, {
+                width: textBlockW,
+                align: 'center',
+            });
     }
 
     // "IDENTITY CARD" banner (below blue header)
