@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { protect, authorize, multitenant } from '../middleware/auth.middleware';
 import SchoolController from '../controllers/school.controller';
 import { UserRole } from '../types';
+import { heavyReadLimiter } from '../middleware/rateLimiters';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ router.use(multitenant);
 
 router.get('/me', SchoolController.getMySchool);
 router.patch('/me', authorize(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN), SchoolController.updateMySchool);
-router.get('/stats', authorize(UserRole.SCHOOL_ADMIN), SchoolController.getDashboardStats);
+router.get('/stats', authorize(UserRole.SCHOOL_ADMIN), heavyReadLimiter, SchoolController.getDashboardStats);
 router.get('/plans', SchoolController.getPlans);
 
 export default router;

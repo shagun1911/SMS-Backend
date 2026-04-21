@@ -36,7 +36,22 @@ export class SupportController {
             if (!user?.schoolId) {
                 return next(new ErrorResponse('School context required', 400));
             }
-            const tickets = await SupportTicket.find({ schoolId: user.schoolId }).sort({ createdAt: -1 }).lean();
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+            const skip = (page - 1) * limit;
+            const filter = { schoolId: user.schoolId };
+            const [tickets, total] = await Promise.all([
+                SupportTicket.find(filter)
+                    .select('subject message priority status schoolName createdAt updatedAt')
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                SupportTicket.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, tickets, 'OK', 200);
         } catch (error) {
             next(error);

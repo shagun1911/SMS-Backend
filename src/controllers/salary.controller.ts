@@ -2,18 +2,25 @@ import { NextFunction, Response } from 'express';
 import { AuthRequest } from '../types';
 import SalaryService from '../services/salary.service';
 import { sendResponse } from '../utils/response';
+import { cache } from '../utils/cache';
+import { salaryGenerationQueue } from '../utils/queue';
 
 class SalaryController {
-    /** GET /salaries?month=April&year=2025&status=pending – school-wide payroll list */
+    /** GET /salaries?month=April&year=2025&status=pending&page=1&limit=100 – school-wide payroll list */
     async listSalaries(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { month, year, status } = req.query;
-            const records = await SalaryService.listSchoolSalaries(req.schoolId!, {
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const { items, total } = await SalaryService.listSchoolSalaries(req.schoolId!, {
                 month: month as string | undefined,
                 year: year ? Number(year) : undefined,
                 status: status as string | undefined,
-            });
-            sendResponse(res, records, 'Payroll list', 200);
+            }, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, items, 'Payroll list', 200);
         } catch (error) {
             next(error);
         }
@@ -23,22 +30,30 @@ class SalaryController {
     async getSummary(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { month, year } = req.query;
-            const summary = await SalaryService.getPayrollSummary(req.schoolId!, {
-                month: month as string | undefined,
-                year: year ? Number(year) : undefined,
-            });
+            const cacheKey = `salary:summary:${req.schoolId}:${month || 'all'}-${year || 'all'}`;
+            const summary = await cache.getOrSet(cacheKey, 20_000, () =>
+                SalaryService.getPayrollSummary(req.schoolId!, {
+                    month: month as string | undefined,
+                    year: year ? Number(year) : undefined,
+                })
+            );
             sendResponse(res, summary, 'Payroll summary', 200);
         } catch (error) {
             next(error);
         }
     }
 
-    // GENERATE Monthly Salaries
+    // GENERATE Monthly Salaries (offloaded to background queue)
     async generateSalaries(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { month, year, specificStaffId } = req.body;
-            const result = await SalaryService.generateMonthlySalaries(req.schoolId!, month, year, specificStaffId);
-            sendResponse(res, result, `Generated salaries for ${month}-${year}`, 201);
+            await salaryGenerationQueue.add('generateSalaries', {
+                schoolId: req.schoolId!,
+                month,
+                year: Number(year),
+                specificStaffId,
+            });
+            sendResponse(res, { status: 'queued', month, year }, `Salary generation for ${month}-${year} initiated in the background`, 202);
         } catch (error) {
             next(error);
         }
@@ -98,8 +113,13 @@ class SalaryController {
     async getStaffSalaryHistory(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { staffId } = req.params;
-            const records = await SalaryService.getStaffSalaryHistory(req.schoolId!, staffId);
-            sendResponse(res, records, 'Staff Salary History Retrieved', 200);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const { items, total } = await SalaryService.getStaffSalaryHistory(req.schoolId!, staffId, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, items, 'Staff Salary History Retrieved', 200);
         } catch (error) {
             next(error);
         }
@@ -112,8 +132,13 @@ class SalaryController {
             if (!staffId) {
                 return next(new Error('User context missing'));
             }
-            const records = await SalaryService.getStaffSalaryHistory(req.schoolId!, staffId);
-            sendResponse(res, records, 'My Salary History Retrieved', 200);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const { items, total } = await SalaryService.getStaffSalaryHistory(req.schoolId!, staffId, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, items, 'My Salary History Retrieved', 200);
         } catch (error) {
             next(error);
         }

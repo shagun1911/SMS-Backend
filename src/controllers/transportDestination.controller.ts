@@ -6,8 +6,13 @@ import { sendResponse } from '../utils/response';
 class TransportDestinationController {
     async getDestinations(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const destinations = await TransportDestinationService.getDestinationsBySchool(req.schoolId!);
-            return sendResponse(res, destinations, 'Transport destinations retrieved', 200);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const { items, total } = await TransportDestinationService.getDestinationsBySchool(req.schoolId!, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            return sendResponse(res, items, 'Transport destinations retrieved', 200);
         } catch (error) {
             return next(error);
         }

@@ -33,9 +33,21 @@ class TransportDestinationService {
     /**
      * Get all transport destinations for a school
      */
-    async getDestinationsBySchool(schoolId: string): Promise<ITransportDestination[]> {
-        const destinations = await TransportDestinationRepository.findBySchool(schoolId);
-        return destinations;
+    async getDestinationsBySchool(
+        schoolId: string,
+        pagination: { page: number; limit: number } = { page: 1, limit: 100 }
+    ): Promise<{ items: ITransportDestination[]; total: number }> {
+        const filter = { schoolId, isActive: true };
+        const skip = (pagination.page - 1) * pagination.limit;
+        const [items, total] = await Promise.all([
+            TransportDestinationRepository.find(filter, {
+                sort: { destinationName: 1 },
+                skip,
+                limit: pagination.limit,
+            }),
+            TransportDestinationRepository.count(filter),
+        ]);
+        return { items, total };
     }
 
     /**

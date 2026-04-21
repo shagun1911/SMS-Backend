@@ -21,7 +21,18 @@ class UserController {
             if (!schoolId) {
                 return res.status(200).json({ success: true, count: 0, data: [] });
             }
-            const users = await User.find({ schoolId }).sort({ role: 1, name: 1 }).lean();
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const [users, total] = await Promise.all([
+                User.find({ schoolId })
+                    .sort({ role: 1, name: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                User.countDocuments({ schoolId }),
+            ]);
 
             // Backfill plainPassword for users that don't have it yet.
             // Limit to 5 per request to avoid blocking the event loop
@@ -45,6 +56,9 @@ class UserController {
                 }));
             }
 
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             return res.status(200).json({
                 success: true,
                 count: users.length,

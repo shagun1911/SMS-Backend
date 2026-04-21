@@ -12,11 +12,13 @@ import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
 import config from '../config';
 import CascadeDeleteService from '../services/cascadeDelete.service';
+import { cache } from '../utils/cache';
 
 export class MasterController {
     /** GET /master/dashboard – clean SaaS dashboard */
     async getDashboard(_req: Request, res: Response, next: NextFunction) {
         try {
+            const cached = await cache.getOrSet('master:dashboard', 20_000, async () => {
             const now = new Date();
             const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -34,20 +36,15 @@ export class MasterController {
             }).length;
 
             if (activeSchoolIds.length === 0) {
-                return sendResponse(
-                    res,
-                    {
-                        totalSchools: 0,
-                        activeSchools: 0,
-                        expiredSchools: 0,
-                        revenue: 0,
-                        newThisMonth: 0,
-                        expiringSchools: [],
-                        mrrTrend: [],
-                    },
-                    'OK',
-                    200
-                );
+                return {
+                    totalSchools: 0,
+                    activeSchools: 0,
+                    expiredSchools: 0,
+                    revenue: 0,
+                    newThisMonth: 0,
+                    expiringSchools: [],
+                    mrrTrend: [],
+                };
             }
 
             const [
@@ -113,21 +110,18 @@ export class MasterController {
                 subscriptionEnd: s.subscriptionEnd,
             }));
 
-            return sendResponse(
-                res,
-                {
-                    totalSchools,
-                    // Active Schools card should match schools table scope/count.
-                    activeSchools: totalSchools,
-                    expiredSchools: expiredOrSuspendedCount,
-                    revenue,
-                    newThisMonth,
-                    expiringSchools,
-                    mrrTrend,
-                },
-                'OK',
-                200
-            );
+            return {
+                totalSchools,
+                // Active Schools card should match schools table scope/count.
+                activeSchools: totalSchools,
+                expiredSchools: expiredOrSuspendedCount,
+                revenue,
+                newThisMonth,
+                expiringSchools,
+                mrrTrend,
+            };
+            });
+            return sendResponse(res, cached, 'OK', 200);
         } catch (error) {
             next(error);
         }
@@ -444,34 +438,38 @@ export class MasterController {
     /** GET /master/usage-reports – Platform Activity (no student/teacher data) */
     async getUsageReports(_req: Request, res: Response, next: NextFunction) {
         try {
-            const now = new Date();
-            const schools = await School.find({ isActive: true }).lean();
-            const schoolIds = (schools as any[]).map((s) => s._id);
-            const subscriptions = await SchoolSubscription.find({ schoolId: { $in: schoolIds } })
-                .populate('planId', 'name')
-                .lean();
-            const subBySchool = new Map((subscriptions as any[]).map((s) => [s.schoolId.toString(), s]));
+            const data = await cache.getOrSet('master:usage', 30_000, async () => {
+                const now = new Date();
+                const schools = await School.find({ isActive: true }).lean();
+                const schoolIds = (schools as any[]).map((s) => s._id);
+                const subscriptions = await SchoolSubscription.find({ schoolId: { $in: schoolIds } })
+                    .populate('planId', 'name')
+                    .lean();
+                const subBySchool = new Map((subscriptions as any[]).map((s) => [s.schoolId.toString(), s]));
 
-            const reports = (schools as any[]).map((s) => {
-                const sub = subBySchool.get(s._id.toString()) as any;
-                const plan = sub?.planId;
-                const planName = plan?.name ?? '—';
-                const status = sub ? (sub.subscriptionEnd < now ? 'expired' : sub.status) : 'none';
-                const end = sub?.subscriptionEnd ? new Date(sub.subscriptionEnd) : null;
-                const daysUntilExpiry = end && end >= now ? Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
-                const lastChange = sub?.updatedAt ?? sub?.subscriptionStart ?? null;
-                return {
-                    schoolId: s._id,
-                    schoolName: s.schoolName,
-                    schoolCode: s.schoolCode,
-                    planName,
-                    subscriptionStatus: status,
-                    daysUntilExpiry,
-                    lastSubscriptionChange: lastChange,
-                };
+                const reports = (schools as any[]).map((s) => {
+                    const sub = subBySchool.get(s._id.toString()) as any;
+                    const plan = sub?.planId;
+                    const planName = plan?.name ?? '—';
+                    const status = sub ? (sub.subscriptionEnd < now ? 'expired' : sub.status) : 'none';
+                    const end = sub?.subscriptionEnd ? new Date(sub.subscriptionEnd) : null;
+                    const daysUntilExpiry = end && end >= now ? Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+                    const lastChange = sub?.updatedAt ?? sub?.subscriptionStart ?? null;
+                    return {
+                        schoolId: s._id,
+                        schoolName: s.schoolName,
+                        schoolCode: s.schoolCode,
+                        planName,
+                        subscriptionStatus: status,
+                        daysUntilExpiry,
+                        lastSubscriptionChange: lastChange,
+                    };
+                });
+
+                return { reports };
             });
 
-            return sendResponse(res, { reports }, 'OK', 200);
+            return sendResponse(res, data, 'OK', 200);
         } catch (error) {
             next(error);
         }
@@ -480,64 +478,63 @@ export class MasterController {
     /** GET /master/billing-overview – revenue and plan distribution */
     async getBillingOverview(_req: Request, res: Response, next: NextFunction) {
         try {
-            const now = new Date();
-            const activeSchools = await School.find({ isActive: true }).select('_id').lean();
-            const activeSchoolIds = (activeSchools as any[]).map((s) => s._id);
+            const data = await cache.getOrSet('master:billing', 30_000, async () => {
+                const now = new Date();
+                const activeSchools = await School.find({ isActive: true }).select('_id').lean();
+                const activeSchoolIds = (activeSchools as any[]).map((s) => s._id);
 
-            const activeSubs = await SchoolSubscription.find({
-                schoolId: { $in: activeSchoolIds },
-                status: 'active',
-                subscriptionEnd: { $gte: now },
-            })
-                .populate('planId', 'name priceMonthly priceYearly')
-                .lean();
+                const activeSubs = await SchoolSubscription.find({
+                    schoolId: { $in: activeSchoolIds },
+                    status: 'active',
+                    subscriptionEnd: { $gte: now },
+                })
+                    .populate('planId', 'name priceMonthly priceYearly')
+                    .lean();
 
-            const planCounts = new Map<string, { count: number; priceMonthly: number; priceYearly: number; name: string }>();
-            let monthlyRevenue = 0;
-            for (const sub of activeSubs as any[]) {
-                const plan = sub.planId;
-                if (!plan) continue;
-                monthlyRevenue += plan.priceMonthly ?? 0;
-                const id = plan._id.toString();
-                if (!planCounts.has(id)) {
-                    planCounts.set(id, {
-                        name: plan.name,
-                        count: 0,
-                        priceMonthly: plan.priceMonthly ?? 0,
-                        priceYearly: plan.priceYearly ?? 0,
-                    });
+                const planCounts = new Map<string, { count: number; priceMonthly: number; priceYearly: number; name: string }>();
+                let monthlyRevenue = 0;
+                for (const sub of activeSubs as any[]) {
+                    const plan = sub.planId;
+                    if (!plan) continue;
+                    monthlyRevenue += plan.priceMonthly ?? 0;
+                    const id = plan._id.toString();
+                    if (!planCounts.has(id)) {
+                        planCounts.set(id, {
+                            name: plan.name,
+                            count: 0,
+                            priceMonthly: plan.priceMonthly ?? 0,
+                            priceYearly: plan.priceYearly ?? 0,
+                        });
+                    }
+                    planCounts.get(id)!.count += 1;
                 }
-                planCounts.get(id)!.count += 1;
-            }
-            const distribution: { planId: string; name: string; priceMonthly: number; priceYearly: number; count: number; revenueMonthly: number; revenueYearly: number }[] = [];
-            planCounts.forEach((v, planId) => {
-                const revMo = v.priceMonthly * v.count;
-                const revYr = v.priceYearly * v.count;
-                distribution.push({
-                    planId,
-                    name: v.name,
-                    priceMonthly: v.priceMonthly,
-                    priceYearly: v.priceYearly,
-                    count: v.count,
-                    revenueMonthly: revMo,
-                    revenueYearly: revYr,
+                const distribution: { planId: string; name: string; priceMonthly: number; priceYearly: number; count: number; revenueMonthly: number; revenueYearly: number }[] = [];
+                planCounts.forEach((v, planId) => {
+                    const revMo = v.priceMonthly * v.count;
+                    const revYr = v.priceYearly * v.count;
+                    distribution.push({
+                        planId,
+                        name: v.name,
+                        priceMonthly: v.priceMonthly,
+                        priceYearly: v.priceYearly,
+                        count: v.count,
+                        revenueMonthly: revMo,
+                        revenueYearly: revYr,
+                    });
                 });
-            });
 
-            const totalSchools = activeSchoolIds.length;
-            const paidCount = activeSubs.length;
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-            const churnThisMonth = await SchoolSubscription.countDocuments({
-                schoolId: { $in: activeSchoolIds },
-                subscriptionEnd: { $gte: startOfMonth, $lte: endOfMonth },
-            });
-            const arpu = paidCount > 0 ? monthlyRevenue / paidCount : 0;
-            const projectedArr = monthlyRevenue * 12;
+                const totalSchools = activeSchoolIds.length;
+                const paidCount = activeSubs.length;
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+                const churnThisMonth = await SchoolSubscription.countDocuments({
+                    schoolId: { $in: activeSchoolIds },
+                    subscriptionEnd: { $gte: startOfMonth, $lte: endOfMonth },
+                });
+                const arpu = paidCount > 0 ? monthlyRevenue / paidCount : 0;
+                const projectedArr = monthlyRevenue * 12;
 
-            return sendResponse(
-                res,
-                {
+                return {
                     monthlyRevenue,
                     annualRevenue: monthlyRevenue * 12,
                     totalOrganizations: totalSchools,
@@ -546,19 +543,34 @@ export class MasterController {
                     arpu,
                     churnThisMonth,
                     projectedArr,
-                },
-                'OK',
-                200
-            );
+                };
+            });
+
+            return sendResponse(res, data, 'OK', 200);
         } catch (error) {
             next(error);
         }
     }
 
     /** GET /master/announcements – list all announcements (master only) */
-    async getAnnouncements(_req: Request, res: Response, next: NextFunction) {
+    async getAnnouncements(req: Request, res: Response, next: NextFunction) {
         try {
-            const list = await SystemAnnouncement.find().sort({ createdAt: -1 }).lean();
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const [list, total] = await Promise.all([
+                SystemAnnouncement.find()
+                    .select('title message priority expiresAt isActive createdAt')
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                SystemAnnouncement.countDocuments(),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, list, 'OK', 200);
         } catch (error) {
             next(error);
@@ -610,9 +622,24 @@ export class MasterController {
     }
 
     /** GET /master/support – list all support tickets */
-    async getSupportTickets(_req: Request, res: Response, next: NextFunction) {
+    async getSupportTickets(req: Request, res: Response, next: NextFunction) {
         try {
-            const list = await SupportTicket.find().sort({ createdAt: -1 }).lean();
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const [list, total] = await Promise.all([
+                SupportTicket.find()
+                    .select('schoolId subject status createdAt updatedAt')
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                SupportTicket.countDocuments(),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, list, 'OK', 200);
         } catch (error) {
             next(error);

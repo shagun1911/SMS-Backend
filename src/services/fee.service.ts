@@ -21,8 +21,16 @@ import {
     countChargeableSessionMonths,
     recurringAnnualMultiplier,
 } from '../utils/feeExemptMonths';
+import { cache } from '../utils/cache';
 
 class FeeService {
+    private invalidateFeeCachesForSchool(schoolId: string) {
+        cache.delPrefix(`fees:stats:${schoolId}`);
+        cache.delPrefix(`fees:defaulters:${schoolId}`);
+        cache.delPrefix(`fees:pending-current:${schoolId}`);
+        cache.delPrefix(`fees:monthly:${schoolId}:`);
+        cache.delPrefix(`school:dashboard:${schoolId}`);
+    }
 
     /**
      * Annual rupee concession on recurring (monthly) fees only: fixed amount plus a percentage of
@@ -609,6 +617,7 @@ class FeeService {
         fs.writeFileSync(pdfPath, pdfBuffer);
         await FeePaymentRepository.update(payment._id.toString(), { pdfPath } as any);
 
+        this.invalidateFeeCachesForSchool(schoolId);
         return { payment, pdfBuffer };
     }
 
@@ -918,6 +927,63 @@ class FeeService {
             }
             return { ...obj, appliedMonths, paymentDetail };
         });
+    }
+
+    async listFeePaymentsPaged(
+        schoolId: string,
+        page: number,
+        limit: number,
+        studentId?: string
+    ): Promise<{ items: Array<IFeePayment & { paymentDetail?: string; appliedMonths?: string[] }>; total: number }> {
+        const safePage = Math.max(1, Math.floor(page || 1));
+        const safeLimit = Math.max(1, Math.min(500, Math.floor(limit || 50)));
+        const [total, payments] = await Promise.all([
+            FeePaymentRepository.countBySchool(schoolId, studentId),
+            FeePaymentRepository.findPaymentsBySchoolPaged(schoolId, safePage, safeLimit, studentId),
+        ]);
+
+        // Hide payments for deleted students, preserve list behavior.
+        const validPayments = payments.filter((p: any) => p.studentId);
+        const receiptNumbers = [...new Set(
+            validPayments
+                .map((p: any) => String((p as any)?.receiptNumber || '').trim())
+                .filter(Boolean)
+        )];
+
+        const receiptToMonths = new Map<string, string[]>();
+        if (receiptNumbers.length) {
+            const feeDocs = await StudentFee.find({
+                schoolId: new Types.ObjectId(schoolId),
+                'payments.receiptNumber': { $in: receiptNumbers },
+            })
+                .select('month payments.receiptNumber')
+                .lean();
+            for (const doc of feeDocs as any[]) {
+                const feeMonth = String(doc?.month || '').trim();
+                if (!feeMonth) continue;
+                for (const row of (doc?.payments || [])) {
+                    const rn = String(row?.receiptNumber || '').trim();
+                    if (!rn) continue;
+                    const arr = receiptToMonths.get(rn) || [];
+                    if (!arr.includes(feeMonth)) arr.push(feeMonth);
+                    receiptToMonths.set(rn, arr);
+                }
+            }
+        }
+
+        const items = validPayments.map((p: any) => {
+            const rn = String((p as any)?.receiptNumber || '').trim();
+            const appliedMonths = [...new Set(rn ? (receiptToMonths.get(rn) || []) : [])];
+            let paymentDetail = 'Fee paid';
+            if (appliedMonths.length === 1) {
+                paymentDetail = appliedMonths[0] === 'One-Time' ? 'One-time fee paid' : `${appliedMonths[0]} fee paid`;
+            } else if (appliedMonths.length > 1) {
+                paymentDetail = `Fees paid (${appliedMonths.join(', ')})`;
+            }
+            return { ...(p as any), appliedMonths, paymentDetail };
+        });
+
+        return { items, total };
     }
 
     async getDefaulters(schoolId: string): Promise<any[]> {
@@ -1535,6 +1601,7 @@ class FeeService {
         if (feeRecord.remainingAmount <= 0) feeRecord.status = FeeStatus.PAID;
 
         await feeRecord.save();
+        this.invalidateFeeCachesForSchool(schoolId);
         return feeRecord;
     }
 
@@ -1569,6 +1636,31 @@ class FeeService {
             .populate('sessionId', 'name')
             .sort({ createdAt: -1 })
             .lean().exec() as unknown as IStudentFee[];
+    }
+
+    async listAllFeesPaged(
+        schoolId: string,
+        filters: any,
+        page: number,
+        limit: number
+    ): Promise<{ items: IStudentFee[]; total: number }> {
+        const filter = getTenantFilter(schoolId, filters);
+        const safePage = Math.max(1, Math.floor(page || 1));
+        const safeLimit = Math.max(1, Math.min(500, Math.floor(limit || 50)));
+        const skip = (safePage - 1) * safeLimit;
+        const [items, total] = await Promise.all([
+            StudentFee.find(filter)
+                .select('studentId sessionId month totalAmount paidAmount remainingAmount status dueDate discount lateFee createdAt updatedAt')
+                .populate('studentId', 'firstName lastName admissionNumber photo')
+                .populate('sessionId', 'name')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(safeLimit)
+                .lean()
+                .exec() as unknown as IStudentFee[],
+            StudentFee.countDocuments(filter),
+        ]);
+        return { items, total };
     }
 
     /**
@@ -1670,6 +1762,7 @@ class FeeService {
             transactionId: payload.transactionId,
         } as any);
 
+        this.invalidateFeeCachesForSchool(schoolId);
         return lastUpdatedFee;
     }
 

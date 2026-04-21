@@ -6,6 +6,7 @@ import OtherPaymentRepository from '../repositories/otherPayment.repository';
 import ErrorResponse from '../utils/errorResponse';
 import { Types } from 'mongoose';
 import UserNotification from '../models/userNotification.model';
+import { cache } from '../utils/cache';
 
 class SalaryService {
     private getPayrollPeriodBounds(month: string, year: number): {
@@ -96,18 +97,25 @@ class SalaryService {
      */
     async listSchoolSalaries(
         schoolId: string,
-        opts: { month?: string; year?: number; status?: string }
-    ): Promise<any[]> {
+        opts: { month?: string; year?: number; status?: string },
+        pagination: { page: number; limit: number } = { page: 1, limit: 100 }
+    ): Promise<{ items: any[]; total: number }> {
         const filter: any = { schoolId };
         if (opts.month) filter.month = opts.month;
         if (opts.year) filter.year = opts.year;
         if (opts.status) filter.status = opts.status;
 
         const Salary = (await import('../models/salary.model')).default;
-        const records = await Salary.find(filter)
-            .populate('staffId', 'name email role')
-            .sort({ createdAt: -1 })
-            .lean();
+        const skip = (pagination.page - 1) * pagination.limit;
+        const [records, total] = await Promise.all([
+            Salary.find(filter)
+                .populate('staffId', 'name email role')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(pagination.limit)
+                .lean(),
+            Salary.countDocuments(filter),
+        ]);
         const filtered = records.filter((r: any) => r.staffId?.role !== UserRole.SCHOOL_ADMIN);
 
         const enriched = await Promise.all(
@@ -138,7 +146,7 @@ class SalaryService {
             })
         );
 
-        return enriched;
+        return { items: enriched, total };
     }
 
     /**
@@ -421,6 +429,9 @@ class SalaryService {
 
         await salaryRecord.save();
 
+        // Invalidate salary caches
+        cache.delPrefix(`salary:summary:${schoolId}`);
+
         // Notify the staff member
         await UserNotification.create({
             userId: salaryRecord.staffId,
@@ -488,8 +499,21 @@ class SalaryService {
     /**
      * Get Salary History for a specific staff member (alias for listSalaryPayments)
      */
-    async getStaffSalaryHistory(schoolId: string, staffId: string): Promise<ISalaryRecord[]> {
-        return await this.listSalaryPayments(schoolId, staffId);
+    async getStaffSalaryHistory(
+        schoolId: string,
+        staffId: string,
+        pagination: { page: number; limit: number } = { page: 1, limit: 50 }
+    ): Promise<{ items: ISalaryRecord[]; total: number }> {
+        const filter: any = { schoolId, staffId };
+        const [items, total] = await Promise.all([
+            SalaryRepository.find(filter, {
+                sort: { year: -1, month: -1 },
+                skip: (pagination.page - 1) * pagination.limit,
+                limit: pagination.limit,
+            }),
+            SalaryRepository.count(filter),
+        ]);
+        return { items, total };
     }
 
     /**
@@ -536,8 +560,22 @@ class SalaryService {
     /**
      * List other payments (bonuses/adjustments) for a staff member
      */
-    async listOtherPayments(schoolId: string, staffId: string): Promise<IOtherPayment[]> {
-        return await OtherPaymentRepository.listByStaff(schoolId, staffId);
+    async listOtherPayments(
+        schoolId: string,
+        staffId: string,
+        pagination: { page: number; limit: number } = { page: 1, limit: 50 }
+    ): Promise<{ items: IOtherPayment[]; total: number }> {
+        const filter = { schoolId, staffId };
+        const skip = (pagination.page - 1) * pagination.limit;
+        const [items, total] = await Promise.all([
+            OtherPaymentRepository.find(filter, {
+                sort: { date: -1 },
+                skip,
+                limit: pagination.limit,
+            }),
+            OtherPaymentRepository.count(filter),
+        ]);
+        return { items, total };
     }
 
     /**

@@ -7,6 +7,7 @@ import {
 } from '../schemas/salary.schema';
 import SalaryController from '../controllers/salary.controller';
 import { UserRole } from '../types';
+import { heavyReadLimiter } from '../middleware/rateLimiters';
 
 const router = Router();
 
@@ -15,12 +16,14 @@ router.use(protect, multitenant);
 router.get(
     '/',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    heavyReadLimiter,
     SalaryController.listSalaries
 );
 
 router.get(
     '/summary',
     authorize(UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT),
+    heavyReadLimiter,
     SalaryController.getSummary
 );
 

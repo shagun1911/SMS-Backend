@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoSanitize from 'express-mongo-sanitize';
+import statusMonitor from 'express-status-monitor';
 
 // Internal modules
 import config from './config';
@@ -15,8 +16,10 @@ import connectDB from './config/database';
 import apiRoutes from './routes';
 import healthRoutes from './routes/health.routes';
 import errorHandler from './middleware/error.middleware';
+import { requestTimeout } from './middleware/timeout.middleware';
 import { seedSystem } from './utils/seeder';
 import { migrateStudentUsernames } from './utils/migrations';
+import { startWorkers } from './utils/queue';
 import * as paymentController from './controllers/payment.controller';
 import { setSocketIOServer } from './lib/socketIoRegistry';
 import { attachBusTrackingSocket } from './sockets/busTracking.socket';
@@ -26,6 +29,24 @@ dotenv.config();
 
 // Initialize app
 const app = express();
+
+// Status Monitor
+app.use(statusMonitor({
+    path: '/system-status',
+    title: 'SMS Backend Status',
+    healthChecks: [{
+        protocol: 'http',
+        host: 'localhost',
+        path: '/health',
+        port: config.port
+    }],
+    // Security: Only allow localhost or with a specific key
+    authorize: (req: any) => {
+        const isLocal = ['::1', '127.0.0.1', '::ffff:127.0.0.1'].includes(req.ip);
+        const hasSecretKey = req.query?.key === config.jwt.accessSecret; // Reuse JWT secret as a temporary monitor key
+        return isLocal || hasSecretKey;
+    }
+}));
 
 // Trust proxy (required when behind Render, Nginx, etc. so rate-limit and IP detection work)
 app.set('trust proxy', 1);
@@ -53,6 +74,10 @@ app.use(
             }
             : config.frontend.url,
         credentials: true,
+        exposedHeaders: [
+            'X-Total-Count', 'X-Page', 'X-Limit',
+            'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset',
+        ],
     })
 );
  //app.use(cors({ origin: "*" }));
@@ -99,6 +124,9 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 
 // Compression
 app.use(compression());
+
+// Hard request timeout to avoid resource exhaustion under high load
+app.use(requestTimeout(config.requestTimeoutMs));
 
 // General API rate limiting (100 requests per 15 minutes)
 const limiter = rateLimit({
@@ -184,6 +212,7 @@ const server = httpServer.listen(PORT, '0.0.0.0', () => {
     connectDB().then(async () => {
         await seedSystem();
         await migrateStudentUsernames();
+        startWorkers();
     }).catch((err) => {
         console.error('Database connection failed:', err.message);
     });

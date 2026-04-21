@@ -20,6 +20,5 @@ const usageSchema = new Schema<IUsage, IUsageModel>(
     { timestamps: false }
 );
 
-usageSchema.index({ schoolId: 1 });
 
 export default model<IUsage, IUsageModel>('Usage', usageSchema);

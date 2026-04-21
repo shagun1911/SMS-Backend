@@ -80,10 +80,21 @@ class HomeworkController {
             const filter: any = { schoolId: req.schoolId, isActive: true };
             if (req.query.class) filter.className = req.query.class;
             if (req.query.section) filter.section = (req.query.section as string).toUpperCase();
-            const homework = await Homework.find(filter)
-                .populate('createdBy', 'name')
-                .sort({ dueDate: 1 })
-                .lean();
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const skip = (page - 1) * limit;
+            const [homework, total] = await Promise.all([
+                Homework.find(filter)
+                    .populate('createdBy', 'name')
+                    .sort({ dueDate: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Homework.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(
                 res,
                 homework.map((h) => normalizeHomeworkResponse(h)),
@@ -99,15 +110,27 @@ class HomeworkController {
     async listForStudent(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const student = req.student!;
-            const homework = await Homework.find({
+            const filter = {
                 schoolId: student.schoolId,
                 className: student.class,
                 section: student.section,
                 isActive: true,
-            })
-                .populate('createdBy', 'name')
-                .sort({ dueDate: 1 })
-                .lean();
+            };
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const skip = (page - 1) * limit;
+            const [homework, total] = await Promise.all([
+                Homework.find(filter)
+                    .populate('createdBy', 'name')
+                    .sort({ dueDate: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Homework.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(
                 res,
                 homework.map((h) => normalizeHomeworkResponse(h)),

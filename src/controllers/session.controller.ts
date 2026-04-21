@@ -8,7 +8,22 @@ class SessionController {
     async getSessions(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const filter = getTenantFilter(req.schoolId!);
-            const sessions = await Session.find(filter).sort({ startDate: -1 });
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 300);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const [sessions, total] = await Promise.all([
+                Session.find(filter)
+                    .select('sessionYear startDate endDate isActive promotionCompleted promotionDate createdAt updatedAt')
+                    .sort({ startDate: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Session.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, sessions, 'Sessions retrieved', 200);
         } catch (error) {
             return next(error);

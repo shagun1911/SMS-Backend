@@ -8,8 +8,13 @@ class OtherPaymentController {
     async listMine(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const staffId = req.user!._id.toString();
-            const records = await SalaryService.listOtherPayments(req.schoolId!, staffId);
-            sendResponse(res, records, 'Other payments fetched', 200);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const { items, total } = await SalaryService.listOtherPayments(req.schoolId!, staffId, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, items, 'Other payments fetched', 200);
         } catch (error) {
             next(error);
         }
@@ -18,8 +23,13 @@ class OtherPaymentController {
     async listForStaff(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { staffId } = req.params;
-            const records = await SalaryService.listOtherPayments(req.schoolId!, staffId);
-            sendResponse(res, records, 'Other payments fetched', 200);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const { items, total } = await SalaryService.listOtherPayments(req.schoolId!, staffId, { page, limit });
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, items, 'Other payments fetched', 200);
         } catch (error) {
             next(error);
         }

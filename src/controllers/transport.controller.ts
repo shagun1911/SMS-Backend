@@ -145,7 +145,20 @@ class TransportController {
     async getFleet(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const filter = getTenantFilter(req.schoolId!);
-            const fleet = await Bus.find(filter);
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const skip = (page - 1) * limit;
+            const [fleet, total] = await Promise.all([
+                Bus.find(filter)
+                    .sort({ busNumber: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Bus.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             sendResponse(res, fleet, 'Fleet retrieved', 200);
         } catch (error) {
             next(error);

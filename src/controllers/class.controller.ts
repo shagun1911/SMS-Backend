@@ -9,9 +9,23 @@ class ClassController {
     async getClasses(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const filter = getTenantFilter(req.schoolId!);
-            const classes = await Class.find(filter)
-                .populate('classTeacherId', 'name')
-                .sort({ className: 1, section: 1 });
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 200, 500);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const [classes, total] = await Promise.all([
+                Class.find(filter)
+                    .select('className section roomNumber capacity classTeacherId isActive createdAt updatedAt')
+                    .populate('classTeacherId', 'name')
+                    .sort({ className: 1, section: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Class.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, classes, 'Classes retrieved', 200);
         } catch (error) {
             return next(error);
@@ -90,7 +104,21 @@ class ClassController {
             }
             const section = (cls as any).section ?? (cls as any).sections?.[0] ?? 'A';
             const filter = { schoolId: req.schoolId, class: cls.className, section, isActive: true };
-            const students = await Student.find(filter).sort({ rollNumber: 1, firstName: 1 });
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const skip = (page - 1) * limit;
+            const [students, total] = await Promise.all([
+                Student.find(filter)
+                    .select('firstName lastName admissionNumber class section rollNumber phone username fatherName photo')
+                    .sort({ rollNumber: 1, firstName: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Student.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, students, 'Class students retrieved', 200);
         } catch (error) {
             return next(error);

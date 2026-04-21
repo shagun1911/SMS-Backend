@@ -30,7 +30,7 @@ const schoolSubscriptionSchema = new Schema<ISchoolSubscription, ISchoolSubscrip
     { timestamps: true }
 );
 
-schoolSubscriptionSchema.index({ schoolId: 1 });
+
 schoolSubscriptionSchema.index({ status: 1 });
 
 export default model<ISchoolSubscription, ISchoolSubscriptionModel>(

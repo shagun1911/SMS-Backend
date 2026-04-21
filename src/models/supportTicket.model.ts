@@ -34,4 +34,9 @@ const supportTicketSchema = new Schema<ISupportTicket, ISupportTicketModel>(
     { timestamps: true }
 );
 
+// Super-admin ticket list: sort by newest, filter by status
+supportTicketSchema.index({ status: 1, createdAt: -1 });
+// Per-school ticket view
+supportTicketSchema.index({ schoolId: 1, createdAt: -1 });
+
 export default model<ISupportTicket, ISupportTicketModel>('SupportTicket', supportTicketSchema);

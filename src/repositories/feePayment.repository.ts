@@ -6,6 +6,33 @@ import SchoolRepository from './school.repository';
 import { BaseRepository } from './base.repository';
 
 class FeePaymentRepository extends BaseRepository<IFeePayment> {
+    async countBySchool(schoolId: string, studentId?: string): Promise<number> {
+        const query: any = { schoolId: new Types.ObjectId(schoolId) };
+        if (studentId) query.studentId = new Types.ObjectId(studentId);
+        return await this.model.countDocuments(query);
+    }
+
+    async findPaymentsBySchoolPaged(
+        schoolId: string,
+        page: number,
+        limit: number,
+        studentId?: string
+    ): Promise<IFeePayment[]> {
+        const safePage = Math.max(1, Math.floor(page || 1));
+        const safeLimit = Math.max(1, Math.min(500, Math.floor(limit || 50)));
+        const skip = (safePage - 1) * safeLimit;
+        const query: any = { schoolId: new Types.ObjectId(schoolId) };
+        if (studentId) query.studentId = new Types.ObjectId(studentId);
+        return await this.model
+            .find(query)
+            .populate('studentId', 'firstName lastName admissionNumber class section')
+            .sort({ paymentDate: -1 })
+            .skip(skip)
+            .limit(safeLimit)
+            .lean()
+            .exec() as unknown as IFeePayment[];
+    }
+
     constructor() {
         super(FeePayment);
     }

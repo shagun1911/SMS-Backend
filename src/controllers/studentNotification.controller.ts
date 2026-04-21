@@ -10,10 +10,23 @@ class StudentNotificationController {
             if (!student?._id) {
                 return next(new ErrorResponse('Not authenticated', 401));
             }
-            const items = await StudentNotification.find({ studentId: student._id })
-                .sort({ createdAt: -1 })
-                .limit(50)
-                .lean();
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
+            const query = { studentId: student._id };
+            const [items, total] = await Promise.all([
+                StudentNotification.find(query)
+                    .select('title message type isRead createdAt metadata')
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                StudentNotification.countDocuments(query),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
             res.status(200).json({ success: true, data: items });
         } catch (error) {
             next(error);

@@ -25,7 +25,21 @@ class ExamController {
     async getExams(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const filter = getTenantFilter(req.schoolId!);
-            const exams = await Exam.find(filter).sort({ startDate: -1 });
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+            const skip = (page - 1) * limit;
+            const [exams, total] = await Promise.all([
+                Exam.find(filter)
+                    .select('title type startDate endDate className section isActive createdAt updatedAt')
+                    .sort({ startDate: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Exam.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, exams, 'Exams retrieved', 200);
         } catch (error) {
             return next(error);
@@ -132,7 +146,20 @@ class ExamController {
         try {
             const { examId } = req.params;
             const filter = { ...getTenantFilter(req.schoolId!), examId };
-            const results = await ExamResult.find(filter).populate('studentId', 'firstName lastName admissionNumber photo');
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const skip = (page - 1) * limit;
+            const [results, total] = await Promise.all([
+                ExamResult.find(filter)
+                    .populate('studentId', 'firstName lastName admissionNumber photo')
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                ExamResult.countDocuments(filter),
+            ]);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, results, 'Results retrieved', 200);
         } catch (error) {
             return next(error);
@@ -169,15 +196,26 @@ class ExamController {
         try {
             const { examId } = req.params;
             const { class: className, section } = req.query;
-            const exam = await Exam.findOne({ _id: examId, schoolId: req.schoolId });
+            const exam = await Exam.findOne({ _id: examId, schoolId: req.schoolId }).lean();
             if (!exam) {
                 return next(new ErrorResponse('Exam not found', 404));
             }
             const filter: any = { schoolId: req.schoolId, isActive: true };
             if (className) filter.class = className;
             if (section) filter.section = section;
-            const students = await Student.find(filter).sort({ class: 1, section: 1, rollNumber: 1 });
-            const cards = students.map((s, idx) => ({
+            const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+            const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+            const skip = (page - 1) * limit;
+            const [students, total] = await Promise.all([
+                Student.find(filter)
+                    .select('firstName lastName admissionNumber class section rollNumber photo fatherName dateOfBirth')
+                    .sort({ class: 1, section: 1, rollNumber: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Student.countDocuments(filter),
+            ]);
+            const cards = students.map((s: any, idx: number) => ({
                 student: {
                     _id: s._id,
                     firstName: s.firstName,
@@ -197,6 +235,9 @@ class ExamController {
                     type: exam.type,
                 },
             }));
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(page));
+            res.setHeader('X-Limit', String(limit));
             return sendResponse(res, cards, 'Admit cards generated', 200);
         } catch (error) {
             return next(error);

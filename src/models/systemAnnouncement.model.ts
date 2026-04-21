@@ -25,4 +25,9 @@ const systemAnnouncementSchema = new Schema<ISystemAnnouncement, ISystemAnnounce
     { timestamps: true }
 );
 
+// School dashboard: fetch active, non-expired announcements (high-frequency read)
+systemAnnouncementSchema.index({ isActive: 1, expiresAt: 1 });
+// Admin list sorted by newest
+systemAnnouncementSchema.index({ createdAt: -1 });
+
 export default model<ISystemAnnouncement, ISystemAnnouncementModel>('SystemAnnouncement', systemAnnouncementSchema);

@@ -11,6 +11,7 @@ import { getPlanLimitsForSchool, getUsageForSchool } from '../services/planLimit
 import Plan from '../models/plan.model';
 import { Types } from 'mongoose';
 import CascadeDeleteService from '../services/cascadeDelete.service';
+import { cache } from '../utils/cache';
 
 class SchoolController {
     /**
@@ -73,6 +74,8 @@ class SchoolController {
     async getDashboardStats(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const schoolId = req.schoolId;
+            const cacheKey = `school:dashboard:${schoolId}`;
+            const cached = await cache.getOrSet(cacheKey, 15_000, async () => {
 
             // Get last 6 months for the chart
             const last6Months = Array.from({ length: 6 }, (_, i) => {
@@ -88,7 +91,6 @@ class SchoolController {
                 pendingFees,
                 monthlyTrends,
                 totalClasses,
-                classList,
                 genderAgg,
                 feeStats
             ] = await Promise.all([
@@ -107,7 +109,6 @@ class SchoolController {
                     { $group: { _id: '$month', total: { $sum: '$paidAmount' } } }
                 ]),
                 Class.countDocuments({ schoolId, isActive: true }),
-                Class.find({ schoolId, isActive: true }),
                 Student.aggregate([
                     { $match: { schoolId: new Types.ObjectId(schoolId), isActive: true } },
                     { $group: { _id: '$gender', count: { $sum: 1 } } }
@@ -124,7 +125,7 @@ class SchoolController {
                 ])
             ]);
 
-            const totalSections = classList?.length ?? 0;
+            const totalSections = totalClasses || 0;
 
             // Modern, dynamic gender ratio (case-insensitive)
             const genderRatio: Record<string, number> = {};
@@ -155,7 +156,7 @@ class SchoolController {
                 total: monthlyTrends.find(t => t._id === month)?.total || 0
             }));
 
-            sendResponse(res, {
+            return {
                 totalStudents,
                 activeStaff,
                 planLimits: {
@@ -177,7 +178,9 @@ class SchoolController {
                 genderRatio,
                 collectionRate,
                 recentActivities: []
-            }, 'Dashboard statistics retrieved', 200);
+            };
+            });
+            sendResponse(res, cached, 'Dashboard statistics retrieved', 200);
         } catch (error) {
             next(error);
         }

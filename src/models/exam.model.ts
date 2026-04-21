@@ -62,6 +62,11 @@ const examSchema = new Schema<IExam>(
     }
 );
 
+// List exams for a school session (primary query pattern)
+examSchema.index({ schoolId: 1, sessionId: 1 });
+// Filter active exams per school (dashboard/student view)
+examSchema.index({ schoolId: 1, isActive: 1, startDate: -1 });
+
 const Exam = model<IExam>('Exam', examSchema);
 
 export default Exam;

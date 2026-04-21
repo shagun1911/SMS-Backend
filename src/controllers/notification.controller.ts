@@ -4,47 +4,37 @@ import { AuthRequest } from '../types';
 import Student from '../models/student.model';
 import School from '../models/school.model';
 import Notification from '../models/notification.model';
-import { sendBulkSms, isTwilioConfigured, SmsSendResult } from '../services/twilio.service';
-import { sendBulkEmail, isGmailConfigured, getAuthUrl, getTokensFromCode } from '../services/gmail.service';
+import { isTwilioConfigured } from '../services/twilio.service';
+import { isGmailConfigured, getAuthUrl, getTokensFromCode } from '../services/gmail.service';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
+import { notificationQueue } from '../utils/queue';
 
 const gmailTokens = new Map<string, { access_token: string; refresh_token?: string }>();
-
-function replaceVars(template: string, student: any, schoolName: string): string {
-    return template
-        .replace(/\{name\}/gi, student.fullName || `${student.firstName || ''} ${student.lastName || ''}`.trim())
-        .replace(/\{firstName\}/gi, student.firstName || '')
-        .replace(/\{lastName\}/gi, student.lastName || '')
-        .replace(/\{fatherName\}/gi, student.fatherName || '')
-        .replace(/\{motherName\}/gi, student.motherName || '')
-        .replace(/\{class\}/gi, student.class || '')
-        .replace(/\{section\}/gi, student.section || '')
-        .replace(/\{phone\}/gi, student.phone || '')
-        .replace(/\{email\}/gi, student.email || '')
-        .replace(/\{admissionNumber\}/gi, student.admissionNumber || '')
-        .replace(/\{amount\}/gi, student.dueAmount != null ? `₹${Number(student.dueAmount).toLocaleString('en-IN')}` : '₹0')
-        .replace(/\{dueAmount\}/gi, student.dueAmount != null ? `₹${Number(student.dueAmount).toLocaleString('en-IN')}` : '₹0')
-        .replace(/\{paidAmount\}/gi, student.paidAmount != null ? `₹${Number(student.paidAmount).toLocaleString('en-IN')}` : '₹0')
-        .replace(/\{totalFee\}/gi, student.totalYearlyFee != null ? `₹${Number(student.totalYearlyFee).toLocaleString('en-IN')}` : '₹0')
-        .replace(/\{school\}/gi, schoolName)
-        .replace(/\{date\}/gi, new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }))
-        .replace(/\{dueDate\}/gi, new Date(Date.now() + 7 * 86400000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
-}
 
 class NotificationController {
     /** GET /notifications – list past notifications for school */
     async listNotifications(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const schoolId = req.schoolId;
-            const page = parseInt(req.query.page as string) || 1;
+            const page = parseInt(req.query.page as string, 10) || 1;
             const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-            const skip = (page - 1) * limit;
+            const safePage = Math.max(1, page);
+            const skip = (safePage - 1) * limit;
             const [rows, total] = await Promise.all([
-                Notification.find({ schoolId }).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('createdBy', 'name').lean(),
+                Notification.find({ schoolId })
+                    .select('type subject message targetGroup recipientCount status sentCount failedCount createdBy createdAt')
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .populate('createdBy', 'name')
+                    .lean(),
                 Notification.countDocuments({ schoolId }),
             ]);
-            sendResponse(res, { rows, pagination: { total, page, pages: Math.ceil(total / limit) } }, 'OK', 200);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(limit));
+            sendResponse(res, { rows, pagination: { total, page: safePage, pages: Math.ceil(total / limit) } }, 'OK', 200);
         } catch (err) { next(err); }
     }
 
@@ -88,32 +78,17 @@ class NotificationController {
                 recipientCount: studentsWithPhone.length, status: 'sending', createdBy: userId,
             });
 
-            const hasVars = /\{[a-zA-Z]+\}/.test(message);
-            let result: { sent: number; failed: number; results: SmsSendResult[] };
-            if (hasVars) {
-                const allResults: SmsSendResult[] = [];
-                let sent = 0, failed = 0;
-                const BATCH = 10;
-                for (let i = 0; i < studentsWithPhone.length; i += BATCH) {
-                    const batch = studentsWithPhone.slice(i, i + BATCH);
-                    const promises = batch.map(async (s: any) => {
-                        const personalizedMsg = replaceVars(message, s, schoolName);
-                        const r = await sendBulkSms([s.phone], personalizedMsg);
-                        sent += r.sent; failed += r.failed;
-                        allResults.push(...r.results);
-                    });
-                    await Promise.all(promises);
-                }
-                result = { sent, failed, results: allResults };
-            } else {
-                result = await sendBulkSms(studentsWithPhone.map((s: any) => s.phone), message);
-            }
-            notif.sentCount = result.sent;
-            notif.failedCount = result.failed;
-            notif.status = result.failed === studentsWithPhone.length ? 'failed' : 'completed';
-            await notif.save();
+            await notificationQueue.add('sendSms', {
+                notificationId: notif._id.toString(),
+                schoolId,
+                type: 'sms',
+                targetGroup: target || 'all',
+                customIds,
+                message,
+                schoolName,
+            });
 
-            sendResponse(res, { sent: result.sent, failed: result.failed, total: studentsWithPhone.length }, 'SMS sent', 200);
+            sendResponse(res, { status: 'queued', total: studentsWithPhone.length }, 'SMS sending initiated in the background', 202);
         } catch (err) { next(err); }
     }
 
@@ -181,39 +156,19 @@ class NotificationController {
                 recipientCount: studentsWithEmail.length, status: 'sending', createdBy: userId,
             });
 
-            const hasVars = /\{[a-zA-Z]+\}/.test(message) || /\{[a-zA-Z]+\}/.test(subject);
-            let result;
-            if (hasVars) {
-                let sent = 0, failed = 0;
-                const BATCH = 5;
-                for (let i = 0; i < studentsWithEmail.length; i += BATCH) {
-                    const batch = studentsWithEmail.slice(i, i + BATCH);
-                    const recipients = batch.map((s: any) => ({
-                        email: s.email,
-                        name: s.fullName || `${s.firstName} ${s.lastName}`,
-                    }));
-                    const promises = batch.map(async (s: any, idx: number) => {
-                        const personalSubject = replaceVars(subject, s, schoolName);
-                        const personalBody = replaceVars(message, s, schoolName);
-                        const r = await sendBulkEmail(tokens, [recipients[idx]], personalSubject, personalBody, schoolName);
-                        sent += r.sent; failed += r.failed;
-                    });
-                    await Promise.all(promises);
-                }
-                result = { sent, failed };
-            } else {
-                const recipients = studentsWithEmail.map((s: any) => ({
-                    email: s.email,
-                    name: s.fullName || `${s.firstName} ${s.lastName}`,
-                }));
-                result = await sendBulkEmail(tokens, recipients, subject, message, schoolName);
-            }
-            notif.sentCount = result.sent;
-            notif.failedCount = result.failed;
-            notif.status = result.failed === studentsWithEmail.length ? 'failed' : 'completed';
-            await notif.save();
+            await notificationQueue.add('sendEmail', {
+                notificationId: notif._id.toString(),
+                schoolId,
+                type: 'email',
+                targetGroup: target || 'all',
+                customIds,
+                subject,
+                message,
+                schoolName,
+                tokens,
+            });
 
-            sendResponse(res, { sent: result.sent, failed: result.failed, total: studentsWithEmail.length }, 'Email sent', 200);
+            sendResponse(res, { status: 'queued', total: studentsWithEmail.length }, 'Email sending initiated in the background', 202);
         } catch (err) { next(err); }
     }
 

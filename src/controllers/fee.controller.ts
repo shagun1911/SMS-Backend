@@ -2,6 +2,8 @@ import { NextFunction, Response } from 'express';
 import { AuthRequest } from '../types';
 import FeeService from '../services/fee.service';
 import { sendResponse } from '../utils/response';
+import { cache } from '../utils/cache';
+import { feeGenerationQueue } from '../utils/queue';
 
 class FeeController {
     // CREATE Fee Structure
@@ -18,13 +20,14 @@ class FeeController {
     async generateFees(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { className, month, dueDate } = req.body;
-            const result = await FeeService.generateMonthlyFees(
-                req.schoolId!,
+            await feeGenerationQueue.add('generateFees', {
+                schoolId: req.schoolId!,
                 className,
                 month,
-                new Date(dueDate)
-            );
-            sendResponse(res, result, `Generated fees for ${month}`, 201);
+                dueDate: new Date(dueDate),
+                staffId: req.user!._id.toString()
+            });
+            sendResponse(res, { status: 'queued' }, `Fee generation for ${month} initiated in the background`, 202);
         } catch (error) {
             next(error);
         }
@@ -73,8 +76,13 @@ class FeeController {
     // LIST All Fees
     async listFees(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const fees = await FeeService.listAllFees(req.schoolId!, req.query);
-            sendResponse(res, fees, 'Fees retrieved', 200);
+            const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+            const { items, total } = await FeeService.listAllFeesPaged(req.schoolId!, req.query, page, limit);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(Math.max(1, page || 1)));
+            res.setHeader('X-Limit', String(Math.max(1, limit || 100)));
+            sendResponse(res, items, 'Fees retrieved', 200);
         } catch (error) {
             next(error);
         }
@@ -145,7 +153,10 @@ class FeeController {
     // GET Fee stats (summary for dashboard)
     async getFeeStats(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const stats = await FeeService.getFeeStats(req.schoolId!);
+            const schoolId = req.schoolId!;
+            const stats = await cache.getOrSet(`fees:stats:${schoolId}`, 15_000, () =>
+                FeeService.getFeeStats(schoolId)
+            );
             sendResponse(res, stats, 'Fee stats retrieved', 200);
         } catch (error) {
             next(error);
@@ -160,7 +171,11 @@ class FeeController {
             if (!year || !month || month < 1 || month > 12) {
                 return void res.status(400).json({ success: false, message: 'Valid year and month (1-12) required' });
             }
-            const data = await FeeService.getMonthlyFeeData(req.schoolId!, year, month);
+            const schoolId = req.schoolId!;
+            const key = `fees:monthly:${schoolId}:${year}-${String(month).padStart(2, '0')}`;
+            const data = await cache.getOrSet(key, 20_000, () =>
+                FeeService.getMonthlyFeeData(schoolId, year, month)
+            );
             sendResponse(res, data, 'Monthly fee data retrieved', 200);
         } catch (error) {
             next(error);
@@ -304,8 +319,13 @@ class FeeController {
     async listPayments(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : undefined;
-            const payments = await FeeService.listFeePayments(req.schoolId!, 200, studentId);
-            sendResponse(res, payments, 'Payments retrieved', 200);
+            const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+            const { items, total } = await FeeService.listFeePaymentsPaged(req.schoolId!, page, limit, studentId);
+            res.setHeader('X-Total-Count', String(total));
+            res.setHeader('X-Page', String(Math.max(1, page || 1)));
+            res.setHeader('X-Limit', String(Math.max(1, limit || 200)));
+            sendResponse(res, items, 'Payments retrieved', 200);
         } catch (error) {
             next(error);
         }
@@ -314,7 +334,10 @@ class FeeController {
     // GET Defaulters
     async getDefaulters(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const defaulters = await FeeService.getDefaulters(req.schoolId!);
+            const schoolId = req.schoolId!;
+            const defaulters = await cache.getOrSet(`fees:defaulters:${schoolId}`, 30_000, () =>
+                FeeService.getDefaulters(schoolId)
+            );
             sendResponse(res, defaulters, 'Defaulters list', 200);
         } catch (error) {
             next(error);
@@ -324,7 +347,10 @@ class FeeController {
     // GET Pending students for current month
     async getPendingCurrentMonth(req: AuthRequest, res: Response, next: NextFunction) {
         try {
-            const pending = await FeeService.getPendingCurrentMonthStudents(req.schoolId!);
+            const schoolId = req.schoolId!;
+            const pending = await cache.getOrSet(`fees:pending-current:${schoolId}`, 20_000, () =>
+                FeeService.getPendingCurrentMonthStudents(schoolId)
+            );
             sendResponse(res, pending, 'Pending students for current month', 200);
         } catch (error) {
             next(error);

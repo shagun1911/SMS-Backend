@@ -51,15 +51,20 @@ class StudentController {
     async getStudents(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
         try {
             const { page, limit, search, class: className, section, status } = req.query;
+            const safePage = parseInt(page as string, 10) || 1;
+            const safeLimit = parseInt(limit as string, 10) || 50;
 
             const result = await StudentService.listStudents(req.schoolId!, {
-                page: parseInt(page as string) || 1,
-                limit: parseInt(limit as string) || 50,
+                page: safePage,
+                limit: safeLimit,
                 search: search as string,
                 class: className as string,
                 section: section as string,
                 status: status as string,
             });
+            res.setHeader('X-Total-Count', String(result.total));
+            res.setHeader('X-Page', String(safePage));
+            res.setHeader('X-Limit', String(safeLimit));
 
             res.status(200).json({
                 success: true,
@@ -67,8 +72,8 @@ class StudentController {
                 pagination: {
                     total: result.total,
                     pages: result.pages,
-                    page: parseInt(page as string) || 1,
-                    limit: parseInt(limit as string) || 50,
+                    page: safePage,
+                    limit: safeLimit,
                 },
             });
         } catch (error) {

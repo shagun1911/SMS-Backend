@@ -92,6 +92,8 @@ const salarySchema = new Schema<ISalaryRecord, ISalaryModel>(
 // Indexes
 // Prevent duplicate salary record for same staff in same month
 salarySchema.index({ schoolId: 1, staffId: 1, month: 1, year: 1 }, { unique: true });
+// Optimize monthly payroll summary queries
+salarySchema.index({ schoolId: 1, month: 1, year: 1 });
 
 const Salary = model<ISalaryRecord, ISalaryModel>('Salary', salarySchema);
 

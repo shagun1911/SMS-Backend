@@ -32,6 +32,8 @@ interface IConfig {
         windowMs: number;
         maxRequests: number;
     };
+    /** Hard request timeout (server-side) to prevent resource exhaustion under load. */
+    requestTimeoutMs: number;
     upload: {
         maxFileSize: number;
     };
@@ -62,6 +64,9 @@ interface IConfig {
     /** Firebase Admin: paste full service account JSON as a single line in env (optional). */
     firebase?: {
         serviceAccountJson?: string;
+    };
+    redis: {
+        url: string;
     };
 }
 
@@ -114,6 +119,7 @@ const config: IConfig = {
         windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
         maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
     },
+    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '25000', 10),
     upload: {
         maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10),
     },
@@ -145,6 +151,9 @@ const config: IConfig = {
         const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
         return raw ? { serviceAccountJson: raw } : undefined;
     })(),
+    redis: {
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
+    },
 };
 
 export default config;

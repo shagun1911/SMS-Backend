@@ -27,7 +27,6 @@ const busLocationSchema = new Schema<IBusLocation>(
     }
 );
 
-busLocationSchema.index({ busId: 1 });
 
 const BusLocation = model<IBusLocation>('BusLocation', busLocationSchema);
 

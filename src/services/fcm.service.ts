@@ -14,11 +14,16 @@ function getMessaging(): admin.messaging.Messaging | null {
     const json = config.firebase?.serviceAccountJson;
     if (!json) return null;
     if (!initialized) {
-        const cred = JSON.parse(json) as admin.ServiceAccount;
-        if (!admin.apps.length) {
-            admin.initializeApp({ credential: admin.credential.cert(cred) });
+        try {
+            const cred = JSON.parse(json) as admin.ServiceAccount;
+            if (!admin.apps.length) {
+                admin.initializeApp({ credential: admin.credential.cert(cred) });
+            }
+            initialized = true;
+        } catch (error: any) {
+            console.error(`Firebase/FCM initialization failed: ${error.message}. Notifications will be disabled.`);
+            return null;
         }
-        initialized = true;
     }
     return admin.messaging();
 }
