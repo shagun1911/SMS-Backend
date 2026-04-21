@@ -46,7 +46,7 @@ app.use(statusMonitor({
         const hasSecretKey = req.query?.key === config.jwt.accessSecret; // Reuse JWT secret as a temporary monitor key
         return isLocal || hasSecretKey;
     }
-}));
+} as any));
 
 // Trust proxy (required when behind Render, Nginx, etc. so rate-limit and IP detection work)
 app.set('trust proxy', 1);
