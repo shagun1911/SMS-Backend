@@ -128,10 +128,10 @@ app.use(compression());
 // Hard request timeout to avoid resource exhaustion under high load
 app.use(requestTimeout(config.requestTimeoutMs));
 
-// General API rate limiting (100 requests per 15 minutes)
+// General API rate limiting (1000 requests per 15 minutes)
 const limiter = rateLimit({
     windowMs: config.rateLimit.windowMs,
-    max: config.rateLimit.maxRequests,
+    max: 1000, // Increased to support multiple users on campus WiFi
     message: { success: false, message: 'Too many requests from this IP, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -141,7 +141,7 @@ app.use('/api', limiter);
 // Strict rate limit on auth routes (20 attempts per 15 minutes per IP)
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: 300, // Increased for school campus WiFi (multiple users on same IP)
     message: { success: false, message: 'Too many login attempts. Please try again after 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,

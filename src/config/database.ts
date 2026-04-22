@@ -4,7 +4,9 @@ import User from '../models/user.model';
 
 const connectDB = async (): Promise<void> => {
     try {
-        const conn = await mongoose.connect(config.mongodb.uri as string);
+        const conn = await mongoose.connect(config.mongodb.uri as string, {
+            maxPoolSize: 100,
+        });
 
         console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
 
