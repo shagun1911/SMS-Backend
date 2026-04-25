@@ -5,7 +5,10 @@ import User from '../models/user.model';
 const connectDB = async (): Promise<void> => {
     try {
         const conn = await mongoose.connect(config.mongodb.uri as string, {
-            maxPoolSize: 100,
+            maxPoolSize: 20,                   // Appropriate for Atlas shared/free tier (was 100)
+            serverSelectionTimeoutMS: 5000,    // Fail fast if no server available
+            socketTimeoutMS: 45000,            // Close sockets after 45s of inactivity
+            heartbeatFrequencyMS: 10000,       // Check connection health every 10s
         });
 
         console.log(`✅ MongoDB Connected: ${conn.connection.host}`);

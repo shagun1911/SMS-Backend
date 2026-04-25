@@ -3,20 +3,34 @@ import { buildStudentUsernameBase, ensureUniqueStudentUsername } from './student
 
 /**
  * Migration: Populate missing usernames for students
- * This finds all students where username is missing and sets it to their firstName (lowercase)
+ * Only fetches students that actually need migration (missing username or plainPassword).
+ * Uses targeted queries instead of fetching all students.
  */
 export async function migrateStudentUsernames() {
     try {
         console.log('🔄 Checking for students with missing usernames...');
 
-        // Find students who don't have a username OR plainPassword field set
-        // OR if username is just the firstName (needs phone suffix for uniqueness)
-        const allStudents = await Student.find({});
+        // Only fetch students that actually need migration
+        const studentsToMigrate = await Student.find({
+            $or: [
+                { username: { $exists: false } },
+                { username: '' },
+                { username: null },
+                { plainPassword: { $exists: false } },
+                { plainPassword: '' },
+                { plainPassword: null },
+            ]
+        });
 
-        console.log(`📝 Checking ${allStudents.length} students for username/password consistency...`);
+        if (studentsToMigrate.length === 0) {
+            console.log('✅ No students need username/password migration.');
+            return;
+        }
+
+        console.log(`📝 Migrating ${studentsToMigrate.length} students with missing username/password...`);
 
         let updatedCount = 0;
-        for (const student of allStudents) {
+        for (const student of studentsToMigrate) {
             try {
                 let changed = false;
                 const base = buildStudentUsernameBase(
@@ -50,8 +64,6 @@ export async function migrateStudentUsernames() {
             }
         }
         console.log(`✅ Migration complete. Updated ${updatedCount} students.`);
-
-        console.log(`✅ Successfully migrated ${updatedCount} students.`);
     } catch (error: any) {
         console.error('❌ Error during student username migration:', error.message);
     }

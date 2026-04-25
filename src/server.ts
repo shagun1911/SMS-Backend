@@ -44,7 +44,7 @@ app.use(statusMonitor({
     authorize: (req: any) => {
         const isLocal = ['::1', '127.0.0.1', '::ffff:127.0.0.1'].includes(req.ip);
         const hasSecretKey = req.query?.key === config.jwt.accessSecret; // Reuse JWT secret as a temporary monitor key
-        return isLocal || hasSecretKey;
+        return Promise.resolve(isLocal || hasSecretKey);
     }
 } as any));
 
@@ -212,24 +212,46 @@ const server = httpServer.listen(PORT, '0.0.0.0', () => {
     connectDB().then(async () => {
         await seedSystem();
         await migrateStudentUsernames();
-        startWorkers();
+        try {
+            await startWorkers();
+        } catch (queueErr: any) {
+            console.warn(`⚠️ Background queue workers failed to start (Redis may be unavailable): ${queueErr.message}`);
+            console.warn('Server will continue without background job processing.');
+        }
     }).catch((err) => {
         console.error('Database connection failed:', err.message);
     });
 });
 
+// Transient error codes that should NOT crash the server
+const TRANSIENT_ERRORS = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
 // Handle unhandled promise rejections
-process.on('unhandledRejection', (err: Error) => {
-    console.log('UNHANDLED REJECTION! 💥 Shutting down...');
-    console.log(err.name, err.message);
-    server.close(() => {
-        process.exit(1);
-    });
+process.on('unhandledRejection', (err: any) => {
+    const code = err?.code || '';
+    if (TRANSIENT_ERRORS.has(code)) {
+        // Network hiccup — log once and move on
+        console.warn(`⚠️ Transient rejection (${code}): ${err.message || err}`);
+        return;
+    }
+    console.error('UNHANDLED REJECTION! 💥', err?.name, err?.message);
+    // Don't crash — let the server keep running. Only fatal OOM-type errors warrant exit.
 });
 
 // Handle uncaught exceptions
-process.on('uncaughtException', (err: Error) => {
-    console.log('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-    console.log(err.name, err.message);
-    process.exit(1);
+process.on('uncaughtException', (err: any) => {
+    const code = err?.code || '';
+    if (TRANSIENT_ERRORS.has(code)) {
+        // Network hiccup — log once and move on
+        console.warn(`⚠️ Transient exception (${code}): ${err.message || err}`);
+        return;
+    }
+    console.error('UNCAUGHT EXCEPTION! 💥', err?.name, err?.message);
+    // For truly fatal errors (syntax, OOM, etc.), exit
+    if (err instanceof SyntaxError || err instanceof RangeError || err instanceof ReferenceError) {
+        console.error('Fatal error — shutting down.');
+        process.exit(1);
+    }
+    // For anything else, log but keep running
+    console.error('Non-fatal uncaught exception — server continues.');
 });

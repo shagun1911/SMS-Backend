@@ -1,6 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
-import IORedis from 'ioredis';
-import config from '../config';
+import { getRedisClient, createBullMQConnection } from '../config/redis';
 import { sendBulkSms } from '../services/twilio.service';
 import { sendBulkEmail } from '../services/gmail.service';
 import Notification from '../models/notification.model';
@@ -8,11 +7,17 @@ import Student from '../models/student.model';
 import { Types } from 'mongoose';
 import FeeService from '../services/fee.service';
 
-const connection = new IORedis(config.redis.url, { maxRetriesPerRequest: null, enableReadyCheck: false });
+// Lazy-initialized queues — only created when startWorkers() is called
+let notificationQueue: Queue | null = null;
+let feeGenerationQueue: Queue | null = null;
+let salaryGenerationQueue: Queue | null = null;
 
-export const notificationQueue = new Queue('notificationQueue', { connection });
-export const feeGenerationQueue = new Queue('feeGenerationQueue', { connection });
-export const salaryGenerationQueue = new Queue('salaryGenerationQueue', { connection });
+/** Get notification queue (lazy, may be null if Redis is unavailable). */
+export const getNotificationQueue = () => notificationQueue;
+/** Get fee generation queue (lazy, may be null if Redis is unavailable). */
+export const getFeeGenerationQueue = () => feeGenerationQueue;
+/** Get salary generation queue (lazy, may be null if Redis is unavailable). */
+export const getSalaryGenerationQueue = () => salaryGenerationQueue;
 
 interface NotificationJobData {
     notificationId: string;
@@ -71,6 +76,22 @@ async function getTargetStudents(schoolId: string, target: string, customIds?: s
 }
 
 export async function startWorkers() {
+    // Test Redis connectivity before creating queues
+    const redis = getRedisClient();
+    try {
+        await redis.ping();
+    } catch (err: any) {
+        console.warn(`⚠️ Redis is not reachable (${err.message}). Background queues disabled.`);
+        return;
+    }
+
+    // Create queues using the shared Redis connection
+    const queueConnection = getRedisClient();
+    notificationQueue = new Queue('notificationQueue', { connection: queueConnection });
+    feeGenerationQueue = new Queue('feeGenerationQueue', { connection: queueConnection });
+    salaryGenerationQueue = new Queue('salaryGenerationQueue', { connection: queueConnection });
+
+    // Each worker needs its own connection (BullMQ requirement)
     // 1. Notification Worker
     const notificationWorker = new Worker('notificationQueue', async (job: Job<NotificationJobData>) => {
         const { notificationId, schoolId, type, targetGroup, customIds, message, subject, schoolName, tokens } = job.data;
@@ -139,7 +160,7 @@ export async function startWorkers() {
             await notif.save();
             throw error;
         }
-    }, { connection });
+    }, { connection: createBullMQConnection() });
 
     // 2. Fee Generation Worker
     const feeWorker = new Worker('feeGenerationQueue', async (job: Job<FeeGenerationJobData>) => {
@@ -151,7 +172,7 @@ export async function startWorkers() {
             console.error(`Fee generation job failed: ${error.message}`);
             throw error;
         }
-    }, { connection });
+    }, { connection: createBullMQConnection() });
 
     // 3. Salary Generation Worker
     const SalaryService = (await import('../services/salary.service')).default;
@@ -164,7 +185,7 @@ export async function startWorkers() {
             console.error(`Salary generation job failed: ${error.message}`);
             throw error;
         }
-    }, { connection, concurrency: 1 }); // concurrency=1: one school's payroll at a time to avoid DB lock contention
+    }, { connection: createBullMQConnection(), concurrency: 1 }); // concurrency=1: one school's payroll at a time to avoid DB lock contention
 
     notificationWorker.on('failed', (job, err) => {
         console.error(`Notification Job ${job?.id} failed: ${err.message}`);

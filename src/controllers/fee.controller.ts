@@ -3,7 +3,8 @@ import { AuthRequest } from '../types';
 import FeeService from '../services/fee.service';
 import { sendResponse } from '../utils/response';
 import { cache } from '../utils/cache';
-import { feeGenerationQueue } from '../utils/queue';
+import { getFeeGenerationQueue } from '../utils/queue';
+import ErrorResponse from '../utils/errorResponse';
 
 class FeeController {
     // CREATE Fee Structure
@@ -20,7 +21,9 @@ class FeeController {
     async generateFees(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { className, month, dueDate } = req.body;
-            await feeGenerationQueue.add('generateFees', {
+            const queue = getFeeGenerationQueue();
+            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
+            await queue.add('generateFees', {
                 schoolId: req.schoolId!,
                 className,
                 month,

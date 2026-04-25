@@ -8,7 +8,7 @@ import { isTwilioConfigured } from '../services/twilio.service';
 import { isGmailConfigured, getAuthUrl, getTokensFromCode } from '../services/gmail.service';
 import ErrorResponse from '../utils/errorResponse';
 import { sendResponse } from '../utils/response';
-import { notificationQueue } from '../utils/queue';
+import { getNotificationQueue } from '../utils/queue';
 
 const gmailTokens = new Map<string, { access_token: string; refresh_token?: string }>();
 
@@ -78,7 +78,9 @@ class NotificationController {
                 recipientCount: studentsWithPhone.length, status: 'sending', createdBy: userId,
             });
 
-            await notificationQueue.add('sendSms', {
+            const queue = getNotificationQueue();
+            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
+            await queue.add('sendSms', {
                 notificationId: notif._id.toString(),
                 schoolId,
                 type: 'sms',
@@ -156,7 +158,9 @@ class NotificationController {
                 recipientCount: studentsWithEmail.length, status: 'sending', createdBy: userId,
             });
 
-            await notificationQueue.add('sendEmail', {
+            const queue = getNotificationQueue();
+            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
+            await queue.add('sendEmail', {
                 notificationId: notif._id.toString(),
                 schoolId,
                 type: 'email',

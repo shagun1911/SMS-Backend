@@ -9,19 +9,31 @@ const INVALID_TOKEN_CODES = new Set([
 ]);
 
 let initialized = false;
+let initFailed = false; // Only log failure once
 
 function getMessaging(): admin.messaging.Messaging | null {
     const json = config.firebase?.serviceAccountJson;
     if (!json) return null;
+    if (initFailed) return null; // Don't retry after permanent failure
     if (!initialized) {
         try {
-            const cred = JSON.parse(json) as admin.ServiceAccount;
+            let parsed = JSON.parse(json);
+            // Handle double-encoded JSON (e.g. Render wrapping the value in extra quotes)
+            if (typeof parsed === 'string') {
+                parsed = JSON.parse(parsed);
+            }
+            // Validate it's actually an object with required fields
+            if (!parsed || typeof parsed !== 'object' || !parsed.project_id) {
+                throw new Error('Parsed service account JSON is not a valid object');
+            }
+            const cred = parsed as admin.ServiceAccount;
             if (!admin.apps.length) {
                 admin.initializeApp({ credential: admin.credential.cert(cred) });
             }
             initialized = true;
         } catch (error: any) {
-            console.error(`Firebase/FCM initialization failed: ${error.message}. Notifications will be disabled.`);
+            initFailed = true; // Don't retry — log once only
+            console.error(`Firebase/FCM initialization failed: ${error.message}. Push notifications will be disabled.`);
             return null;
         }
     }

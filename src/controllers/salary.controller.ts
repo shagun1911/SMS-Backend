@@ -3,7 +3,8 @@ import { AuthRequest } from '../types';
 import SalaryService from '../services/salary.service';
 import { sendResponse } from '../utils/response';
 import { cache } from '../utils/cache';
-import { salaryGenerationQueue } from '../utils/queue';
+import { getSalaryGenerationQueue } from '../utils/queue';
+import ErrorResponse from '../utils/errorResponse';
 
 class SalaryController {
     /** GET /salaries?month=April&year=2025&status=pending&page=1&limit=100 – school-wide payroll list */
@@ -47,7 +48,9 @@ class SalaryController {
     async generateSalaries(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { month, year, specificStaffId } = req.body;
-            await salaryGenerationQueue.add('generateSalaries', {
+            const queue = getSalaryGenerationQueue();
+            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
+            await queue.add('generateSalaries', {
                 schoolId: req.schoolId!,
                 month,
                 year: Number(year),
