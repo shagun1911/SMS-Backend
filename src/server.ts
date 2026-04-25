@@ -193,7 +193,7 @@ setSocketIOServer(io);
 attachBusTrackingSocket(io);
 
 // Bind to 0.0.0.0 so the service is reachable on Render's assigned PORT
-const server = httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
     const geminiStatus = config.gemini?.apiKey ? 'configured' : 'not set';
     console.log(`
   ╔═══════════════════════════════════════════════════════╗
