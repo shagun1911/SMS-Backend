@@ -10,7 +10,7 @@ import { UserRole } from '../types';
 import { applyCrewLocationUpdate, BUS_LOCATION_STALE_MS } from '../services/busLiveLocation.service';
 
 type SocketData = {
-    kind: 'crew' | 'student';
+    kind: 'crew' | 'student' | 'manager';
     busId: string;
     userId?: string;
     studentId?: string;
@@ -62,10 +62,19 @@ export function attachBusTrackingSocket(io: Server): void {
                 return next(new Error('USER_NOT_FOUND'));
             }
             const role = user.role as UserRole;
+            const schoolId = user.schoolId as mongoose.Types.ObjectId | undefined;
+
+            if (role === UserRole.TRANSPORT_MANAGER) {
+                (socket.data as SocketData).kind = 'manager' as any;
+                (socket.data as SocketData).userId = String(user._id);
+                (socket.data as SocketData).role = role;
+                (socket.data as SocketData).schoolId = schoolId;
+                return next();
+            }
+
             if (role !== UserRole.BUS_DRIVER && role !== UserRole.CONDUCTOR) {
                 return next(new Error('NOT_CREW'));
             }
-            const schoolId = user.schoolId as mongoose.Types.ObjectId | undefined;
             const bus = await Bus.findOne({
                 schoolId,
                 isActive: true,
@@ -82,15 +91,22 @@ export function attachBusTrackingSocket(io: Server): void {
             (socket.data as SocketData).role = role;
             (socket.data as SocketData).schoolId = schoolId;
             return next();
-        } catch {
+        } catch (error) {
+            console.error('Socket auth error:', error);
             return next(new Error('AUTH_INVALID'));
         }
     });
 
     io.on('connection', (socket: Socket) => {
-        const data = socket.data as SocketData;
-        const room = `bus:${data.busId}`;
-        socket.join(room);
+        const data = socket.data as SocketData & { kind: 'crew' | 'student' | 'manager' };
+
+        if (data.kind === 'manager') {
+            const room = `school:${data.schoolId}:buses`;
+            socket.join(room);
+        } else {
+            const room = `bus:${data.busId}`;
+            socket.join(room);
+        }
 
         if (data.kind === 'student') {
             BusLocation.findOne({ busId: new mongoose.Types.ObjectId(data.busId) })
@@ -141,7 +157,11 @@ export function attachBusTrackingSocket(io: Server): void {
         });
 
         socket.on('disconnect', () => {
-            socket.leave(room);
+            if (data.kind === 'manager') {
+                socket.leave(`school:${data.schoolId}:buses`);
+            } else {
+                socket.leave(`bus:${data.busId}`);
+            }
         });
     });
 }

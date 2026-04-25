@@ -116,13 +116,17 @@ export async function applyCrewLocationUpdate(params: {
         lastBroadcastMeta.set(busIdStr, { t: now, lat, lng });
         const io = getSocketIOServer();
         if (io) {
-            io.to(`bus:${busIdStr}`).emit('bus:location', {
+            const payload = {
                 busId: busIdStr,
                 lat,
                 lng,
                 accuracy: acc,
                 updatedAt: new Date().toISOString(),
-            });
+            };
+            io.to(`bus:${busIdStr}`).emit('bus:location', payload);
+            if (params.schoolId) {
+                io.to(`school:${params.schoolId}:buses`).emit('bus:location', payload);
+            }
         }
     }
 

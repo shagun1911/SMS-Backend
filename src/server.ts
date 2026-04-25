@@ -30,15 +30,33 @@ dotenv.config();
 // Initialize app
 const app = express();
 
+const PORT = config.port || 5000;
+const httpServer = http.createServer(app);
+
+const io = new Server(httpServer, {
+    path: '/socket.io',
+    cors: {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST'],
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+});
+
+setSocketIOServer(io);
+attachBusTrackingSocket(io);
+
 // Status Monitor
 app.use(statusMonitor({
     path: '/system-status',
     title: 'SMS Backend Status',
+    websocket: io,
     healthChecks: [{
         protocol: 'http',
         host: 'localhost',
         path: '/health',
-        port: config.port
+        port: PORT
     }],
     // Security: Only allow localhost or with a specific key
     authorize: (req: any) => {
@@ -173,24 +191,6 @@ app.use(errorHandler);
 // ============================================
 // SERVER START – bind port first (required by Render), then connect DB
 // ============================================
-
-const PORT = config.port || 5000;
-
-const httpServer = http.createServer(app);
-
-const io = new Server(httpServer, {
-    path: '/socket.io',
-    cors: {
-        origin: true,
-        credentials: true,
-        methods: ['GET', 'POST'],
-    },
-    pingTimeout: 60000,
-    pingInterval: 25000,
-});
-
-setSocketIOServer(io);
-attachBusTrackingSocket(io);
 
 // Bind to 0.0.0.0 so the service is reachable on Render's assigned PORT
 httpServer.listen(PORT, '0.0.0.0', () => {
