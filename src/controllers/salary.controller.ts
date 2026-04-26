@@ -4,7 +4,7 @@ import SalaryService from '../services/salary.service';
 import { sendResponse } from '../utils/response';
 import { cache } from '../utils/cache';
 import { getSalaryGenerationQueue } from '../utils/queue';
-import ErrorResponse from '../utils/errorResponse';
+
 
 class SalaryController {
     /** GET /salaries?month=April&year=2025&status=pending&page=1&limit=100 – school-wide payroll list */

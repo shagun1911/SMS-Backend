@@ -47,6 +47,7 @@ export interface IUser extends Document {
         branchName: string;
     };
     isActive: boolean;
+    seenNotificationIds?: string[];
     lastLogin?: Date;
     mustChangePassword?: boolean;
     permissions?: string[];
@@ -201,6 +202,7 @@ export interface IStudent extends Document {
     birthCertificate?: string;
     status: StudentStatus;
     isActive: boolean;
+    seenNotificationIds?: string[];
     usesTransport: boolean;
     transportDestinationId?: Types.ObjectId;
     busId?: Types.ObjectId;

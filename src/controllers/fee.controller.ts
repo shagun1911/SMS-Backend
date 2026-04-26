@@ -4,7 +4,7 @@ import FeeService from '../services/fee.service';
 import { sendResponse } from '../utils/response';
 import { cache } from '../utils/cache';
 import { getFeeGenerationQueue } from '../utils/queue';
-import ErrorResponse from '../utils/errorResponse';
+
 
 class FeeController {
     // CREATE Fee Structure
