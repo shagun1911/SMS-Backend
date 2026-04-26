@@ -64,6 +64,26 @@ class StudentNotificationController {
             next(error);
         }
     }
+
+    async syncSeen(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const student = req.student;
+            if (!student?._id) return next(new ErrorResponse('Not authenticated', 401));
+
+            const { seenIds } = req.body;
+            if (!Array.isArray(seenIds)) return next(new ErrorResponse('seenIds array required', 400));
+
+            // Use $addToSet to merge unique IDs into the persistent list
+            await (student as any).constructor.updateOne(
+                { _id: student._id },
+                { $addToSet: { seenNotificationIds: { $each: seenIds } } }
+            );
+
+            res.status(200).json({ success: true });
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new StudentNotificationController();

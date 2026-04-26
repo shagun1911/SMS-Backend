@@ -170,6 +170,10 @@ const studentSchema = new Schema<IStudent, IStudentModel>(
             type: [String],
             default: [],
         },
+        seenNotificationIds: {
+            type: [String],
+            default: [],
+        },
     },
     {
         timestamps: true,

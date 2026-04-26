@@ -17,20 +17,26 @@ class FeeController {
         }
     }
 
-    // GENERATE Monthly Fees
+    // GENERATE Monthly Fees (offloaded to background queue with sync fallback)
     async generateFees(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { className, month, dueDate } = req.body;
             const queue = getFeeGenerationQueue();
-            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
-            await queue.add('generateFees', {
-                schoolId: req.schoolId!,
-                className,
-                month,
-                dueDate: new Date(dueDate),
-                staffId: req.user!._id.toString()
-            });
-            sendResponse(res, { status: 'queued' }, `Fee generation for ${month} initiated in the background`, 202);
+            
+            if (queue) {
+                await queue.add('generateFees', {
+                    schoolId: req.schoolId!,
+                    className,
+                    month,
+                    dueDate: new Date(dueDate),
+                    staffId: req.user!._id.toString()
+                });
+                return void sendResponse(res, { status: 'queued' }, `Fee generation for ${month} initiated in the background`, 202);
+            }
+
+            // Fallback: Process synchronously if Redis/Queue is unavailable
+            await FeeService.generateMonthlyFees(req.schoolId!, className, month, new Date(dueDate));
+            sendResponse(res, { status: 'completed' }, `Fee generation for ${month} completed successfully (sync)`, 200);
         } catch (error) {
             next(error);
         }

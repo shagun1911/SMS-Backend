@@ -11,6 +11,7 @@ router.use(multitenant);
 
 router.get('/', UserNotificationController.getMyNotifications);
 router.patch('/read-all', UserNotificationController.markAllAsRead);
+router.patch('/sync-seen', UserNotificationController.syncSeen);
 router.patch('/:id/read', UserNotificationController.markAsRead);
 
 export default router;

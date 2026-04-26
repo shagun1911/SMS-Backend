@@ -8,6 +8,7 @@ router.use(protectStudent);
 
 router.get('/', StudentNotificationController.listMine);
 router.patch('/read-all', StudentNotificationController.markAllRead);
+router.patch('/sync-seen', StudentNotificationController.syncSeen);
 router.patch('/:id/read', StudentNotificationController.markRead);
 
 export default router;

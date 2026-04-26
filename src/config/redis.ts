@@ -25,6 +25,15 @@ const REDIS_BASE_OPTIONS: RedisOptions = {
     },
 };
 
+const getRedisOptions = (url: string): RedisOptions => {
+    const isSecure = url.startsWith('rediss://');
+    return {
+        ...REDIS_BASE_OPTIONS,
+        // If the URL is rediss://, we must enable TLS
+        tls: isSecure ? { rejectUnauthorized: false } : undefined,
+    };
+};
+
 let redisClient: Redis | null = null;
 let redisAvailable = false;
 
@@ -35,7 +44,7 @@ let redisAvailable = false;
  */
 export const getRedisClient = (): Redis => {
     if (!redisClient) {
-        redisClient = new Redis(config.redis.url, { ...REDIS_BASE_OPTIONS });
+        redisClient = new Redis(config.redis.url, getRedisOptions(config.redis.url));
 
         redisClient.on('connect', () => {
             redisAvailable = true;
@@ -80,7 +89,7 @@ export const isRedisAvailable = (): boolean => redisAvailable;
  * Uses the same resilient config as the singleton.
  */
 export const createBullMQConnection = (): Redis => {
-    const conn = new Redis(config.redis.url, { ...REDIS_BASE_OPTIONS });
+    const conn = new Redis(config.redis.url, getRedisOptions(config.redis.url));
 
     conn.on('error', (error) => {
         const code = (error as any).code;

@@ -147,6 +147,10 @@ const userSchema = new Schema<IUser, IUserModel>(
             type: [String],
             default: [],
         },
+        seenNotificationIds: {
+            type: [String],
+            default: [],
+        },
     },
     {
         timestamps: true,

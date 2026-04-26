@@ -44,19 +44,29 @@ class SalaryController {
         }
     }
 
-    // GENERATE Monthly Salaries (offloaded to background queue)
+    // GENERATE Monthly Salaries (offloaded to background queue with sync fallback)
     async generateSalaries(req: AuthRequest, res: Response, next: NextFunction) {
         try {
             const { month, year, specificStaffId } = req.body;
             const queue = getSalaryGenerationQueue();
-            if (!queue) return next(new ErrorResponse('Background job processing is temporarily unavailable. Please try again later.', 503));
-            await queue.add('generateSalaries', {
-                schoolId: req.schoolId!,
-                month,
-                year: Number(year),
-                specificStaffId,
-            });
-            sendResponse(res, { status: 'queued', month, year }, `Salary generation for ${month}-${year} initiated in the background`, 202);
+            
+            if (queue) {
+                await queue.add('generateSalaries', {
+                    schoolId: req.schoolId!,
+                    month,
+                    year: Number(year),
+                    specificStaffId,
+                });
+                return void sendResponse(res, { status: 'queued', month, year }, `Salary generation for ${month}-${year} initiated in the background`, 202);
+            }
+
+            // Fallback: Process synchronously if Redis/Queue is unavailable
+            const result = await SalaryService.generateMonthlySalaries(req.schoolId!, month, Number(year), specificStaffId);
+            sendResponse(res, { 
+                status: 'completed', 
+                created: result.created, 
+                updated: result.updated 
+            }, `Salary generation for ${month}-${year} completed successfully (sync)`, 200);
         } catch (error) {
             next(error);
         }

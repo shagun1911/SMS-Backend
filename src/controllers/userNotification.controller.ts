@@ -90,6 +90,29 @@ class UserNotificationController {
             next(error);
         }
     }
+
+    /** PATCH /api/v1/user-notifications/sync-seen */
+    async syncSeen(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user?._id;
+            if (!userId) throw new ErrorResponse('Not authenticated', 401);
+
+            const { seenIds } = req.body;
+            if (!Array.isArray(seenIds)) {
+                throw new ErrorResponse('seenIds array required', 400);
+            }
+
+            // Use $addToSet to merge unique IDs into the persistent list on the User document
+            await (req.user as any).constructor.updateOne(
+                { _id: userId },
+                { $addToSet: { seenNotificationIds: { $each: seenIds } } }
+            );
+
+            res.status(200).json({ success: true });
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new UserNotificationController();
