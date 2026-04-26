@@ -91,9 +91,9 @@ export function attachBusTrackingSocket(io: Server): void {
             (socket.data as SocketData).role = role;
             (socket.data as SocketData).schoolId = schoolId;
             return next();
-        } catch (error) {
-            console.error('Socket auth error:', error);
-            return next(new Error('AUTH_INVALID'));
+        } catch (error: any) {
+            console.error('[Socket Auth] Verification failed:', error.message);
+            return next(new Error(`AUTH_INVALID: ${error.message}`));
         }
     });
 

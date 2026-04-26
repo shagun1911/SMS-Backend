@@ -36,12 +36,16 @@ const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
     path: '/socket.io',
     cors: {
-        origin: true,
+        origin: (origin, callback) => {
+            // Allow all origins for mobile/web flexibility
+            callback(null, true);
+        },
         credentials: true,
         methods: ['GET', 'POST'],
     },
     pingTimeout: 60000,
     pingInterval: 25000,
+    connectTimeout: 45000,
 });
 
 setSocketIOServer(io);
