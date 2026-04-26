@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import StaffAbsentDay from '../models/staffAbsentDay.model';
 import StaffPresentDay from '../models/staffPresentDay.model';
 import User from '../models/user.model';
+import TimetableSettings from '../models/timetableSettings.model';
 import UserNotification from '../models/userNotification.model';
 import { sendNotificationToStaffUsers } from '../services/fcm.service';
 import ErrorResponse from '../utils/errorResponse';
@@ -17,6 +18,26 @@ const EXCLUDED_ROLES: UserRole[] = [
 const EXCLUDED_SET = new Set(EXCLUDED_ROLES);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * Returns true if the given YYYY-MM-DD date falls on a configured working day for the school.
+ * Falls back to Mon–Sat (1–6) if no settings are found.
+ */
+async function isWorkingDay(schoolId: string, dateStr: string): Promise<boolean> {
+    const settings = await TimetableSettings.findOne({ schoolId, isActive: true })
+        .select('workingDays')
+        .lean();
+    const workingDays: string[] =
+        Array.isArray((settings as any)?.workingDays) && (settings as any).workingDays.length > 0
+            ? (settings as any).workingDays
+            : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; // default backward-compat
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay(); // 0=Sun…6=Sat
+    const shortDay = SHORT_DAYS[dayOfWeek];
+    return workingDays.includes(shortDay);
+}
 
 /** Calendar YYYY-MM-DD (UTC) from account creation or explicit joining date — absence totals count from this day onward. */
 function joinStartYmd(user: { joiningDate?: Date | null; createdAt?: Date | null }): string {
@@ -163,6 +184,17 @@ class StaffAttendanceController {
                 return next(new ErrorResponse('date (YYYY-MM-DD) is required', 400));
             }
             assertNotFutureYmd(date, req);
+
+            // Prevent marking attendance on non-working days
+            if (!(await isWorkingDay(schoolId, date))) {
+                const [y, m, d] = date.split('-').map(Number);
+                const dayName = SHORT_DAYS[new Date(y, m - 1, d).getDay()];
+                return next(new ErrorResponse(
+                    `${dayName} (${date}) is not a working day for this school. Attendance cannot be marked on holidays or non-working days.`,
+                    400
+                ));
+            }
+
             if (!marks || typeof marks !== 'object' || Array.isArray(marks)) {
                 return next(new ErrorResponse('marks object is required', 400));
             }
@@ -276,6 +308,17 @@ class StaffAttendanceController {
                 return next(new ErrorResponse('date (YYYY-MM-DD) is required', 400));
             }
             assertNotFutureYmd(date, req);
+
+            // Do NOT finalize attendance on non-working days — no one should be absent on a holiday.
+            if (!(await isWorkingDay(schoolId, date))) {
+                const [y, m, d] = date.split('-').map(Number);
+                const dayName = SHORT_DAYS[new Date(y, m - 1, d).getDay()];
+                return res.status(200).json({
+                    success: true,
+                    message: `${dayName} (${date}) is a non-working day. No attendance was finalized. Staff are not marked absent on holidays.`,
+                    data: { presentCount: 0, absentCount: 0, isNonWorkingDay: true },
+                });
+            }
 
             const eligible = await User.find({
                 schoolId,
