@@ -145,11 +145,11 @@ async function fetchTimetablesWithSchoolGridFallback(
 }
 
 async function getTeacherConflicts(
-    schoolId: string,
-    dayOfWeek: number,
-    slots: { teacherId?: string; startTime: string }[],
-    excludeClassName?: string,
-    excludeSection?: string
+    _schoolId: string,
+    _dayOfWeek: number,
+    _slots: { teacherId?: string; startTime: string }[],
+    _excludeClassName?: string,
+    _excludeSection?: string
 ): Promise<string[]> {
     // Disabled per user request to allow same teacher in multiple classes for testing.
     return [];
