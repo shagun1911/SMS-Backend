@@ -23,6 +23,9 @@ router.post('/versions/save', requirePermission(TEACHER_PERMISSIONS.EDIT_TIMETAB
 router.patch('/versions/:id/lock', authorize(UserRole.SCHOOL_ADMIN), TimetableController.lockVersion);
 router.post('/copy-session', authorize(UserRole.SCHOOL_ADMIN), TimetableController.copyFromSession);
 
+router.get('/day', TimetableController.getDayTimetable);
+router.post('/day', requirePermission(TEACHER_PERMISSIONS.EDIT_TIMETABLE), TimetableController.saveDayTimetable);
+
 router.get('/', TimetableController.getTimetables);
 router.post('/', requirePermission(TEACHER_PERMISSIONS.EDIT_TIMETABLE), TimetableController.upsertTimetable);
 router.put('/:id', requirePermission(TEACHER_PERMISSIONS.EDIT_TIMETABLE), TimetableController.updateTimetable);

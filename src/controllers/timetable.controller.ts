@@ -204,6 +204,8 @@ class TimetableController {
                 breaks: breaksBody,
                 subjects,
                 sessionId,
+                workingDays,
+                classSettings,
             } = req.body;
             const filter: any = { schoolId: req.schoolId };
             if (sessionId) filter.sessionId = sessionId;
@@ -229,6 +231,11 @@ class TimetableController {
             const lbd = lunchBreakDuration ?? 40;
             const bl = (breakLabel || 'Lunch Break').toString().trim();
 
+            const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const validWorkingDays = Array.isArray(workingDays)
+                ? workingDays.filter((d: string) => ALL_DAYS.includes(d))
+                : undefined;
+
             const payload: any = {
                 schoolId: req.schoolId,
                 sessionId: sessionId || undefined,
@@ -241,6 +248,25 @@ class TimetableController {
                 subjects: Array.isArray(subjects) ? subjects : [],
                 isActive: true,
             };
+
+            if (validWorkingDays && validWorkingDays.length > 0) {
+                payload.workingDays = validWorkingDays;
+            }
+
+            if (Array.isArray(classSettings)) {
+                payload.classSettings = classSettings.map((cs: any) => ({
+                    className: String(cs.className || '').trim(),
+                    section: String(cs.section || 'A').trim().toUpperCase(),
+                    periodCount: Math.max(1, Math.min(12, Number(cs.periodCount) || pc)),
+                    periodDurationMinutes: Math.max(10, Math.min(120, Number(cs.periodDurationMinutes) || pdm)),
+                    firstPeriodStart: String(cs.firstPeriodStart || fps).trim(),
+                    breaks: Array.isArray(cs.breaks) ? cs.breaks.map((b: any) => ({
+                        afterPeriod: Math.max(0, Math.min(12, Number(b.afterPeriod) || 0)),
+                        label: String(b.label || 'Break').trim().slice(0, 40) || 'Break',
+                        durationMinutes: Math.max(5, Math.min(120, Number(b.durationMinutes) || 15)),
+                    })) : [],
+                }));
+            }
 
             if (breaksPayload !== undefined) {
                 payload.breaks = breaksPayload;
@@ -262,6 +288,86 @@ class TimetableController {
                 settings = await TimetableSettings.create(payload);
             }
             return sendResponse(res, settings, 'Timetable settings saved', 200);
+        } catch (error) {
+            return next(error);
+        }
+    }
+
+    /** GET /timetable/day?className=&section=&dayOfWeek= — fetch one class+day timetable */
+    async getDayTimetable(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const className = String(req.query.className || '').trim();
+            const section = String(req.query.section || 'A').trim().toUpperCase();
+            const dayOfWeek = Number(req.query.dayOfWeek);
+            if (!className) return next(new ErrorResponse('className is required', 400));
+            if (isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+                return next(new ErrorResponse('dayOfWeek must be 0–6', 400));
+            }
+            const timetables = await fetchTimetablesWithSchoolGridFallback(req.schoolId, className, section);
+            const dayTt = (timetables as any[]).find((t) => t.dayOfWeek === dayOfWeek);
+            const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+            // Find class-specific settings override
+            const classCfg = (settings?.classSettings || []).find(
+                (cs: any) =>
+                    normTimetableClassName(cs.className) === normTimetableClassName(className) &&
+                    String(cs.section || 'A').toUpperCase() === section
+            );
+            return sendResponse(res, {
+                className,
+                section,
+                dayOfWeek,
+                slots: dayTt?.slots || [],
+                settings: classCfg || null,
+                globalSettings: settings,
+            }, 'Day timetable retrieved', 200);
+        } catch (error) {
+            return next(error);
+        }
+    }
+
+    /** POST /timetable/day — save one class+day timetable */
+    async saveDayTimetable(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const { className, section, dayOfWeek, slots, sessionId } = req.body;
+            const sec = String(section || 'A').trim().toUpperCase();
+            const day = Number(dayOfWeek);
+            if (day < 0 || day > 6 || isNaN(day)) {
+                return next(new ErrorResponse('dayOfWeek must be 0–6', 400));
+            }
+            // Validate against configured working days
+            const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+            const WORKING_DAYS_MAP: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+            const configuredWorkingDays: string[] = (settings?.workingDays?.length ? settings.workingDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+            const allowedNums = configuredWorkingDays.map((d) => WORKING_DAYS_MAP[d]).filter((n) => n !== undefined);
+            if (!allowedNums.includes(day)) {
+                return next(new ErrorResponse(`Day ${day} is not a configured working day for this school`, 400));
+            }
+            const conflicts = await getTeacherConflicts(req.schoolId!, day, slots || [], className, sec);
+            if (conflicts.length > 0) {
+                return res.status(400).json({ success: false, message: 'Teacher conflict', conflicts });
+            }
+            const existing = await Timetable.findOne({
+                schoolId: req.schoolId,
+                className,
+                section: sec,
+                dayOfWeek: day,
+            });
+            const payload: any = {
+                schoolId: req.schoolId,
+                className,
+                section: sec,
+                dayOfWeek: day,
+                slots: slots || [],
+                isActive: true,
+            };
+            if (sessionId) payload.sessionId = sessionId;
+            let doc;
+            if (existing) {
+                doc = await Timetable.findByIdAndUpdate(existing._id, payload, { new: true }).populate('slots.teacherId', 'name');
+            } else {
+                doc = await (await Timetable.create(payload)).populate('slots.teacherId', 'name');
+            }
+            return sendResponse(res, doc, 'Day timetable saved', 200);
         } catch (error) {
             return next(error);
         }
@@ -507,7 +613,17 @@ class TimetableController {
             const { className, section, dayOfWeek, slots, sessionId } = req.body;
             const sec = section || 'A';
             const day = Number(dayOfWeek);
-            if (day < 1 || day > 5) return next(new ErrorResponse('dayOfWeek must be 1–5 (Mon–Fri)', 400));
+            if (day < 0 || day > 6 || isNaN(day)) return next(new ErrorResponse('dayOfWeek must be 0–6', 400));
+            // Validate against configured working days
+            const settingsForValidation = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true }).lean();
+            const WORKING_DAYS_MAP: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+            const configuredDays: string[] = settingsForValidation?.workingDays?.length
+                ? settingsForValidation.workingDays
+                : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const allowedNums = configuredDays.map((d) => WORKING_DAYS_MAP[d]).filter((n) => n !== undefined);
+            if (!allowedNums.includes(day)) {
+                return next(new ErrorResponse(`Day ${day} is not a configured working day for this school`, 400));
+            }
 
             const conflicts = await getTeacherConflicts(req.schoolId!, day, slots || [], className, sec);
             if (conflicts.length > 0) {
