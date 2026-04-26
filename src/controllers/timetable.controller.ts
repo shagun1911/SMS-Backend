@@ -144,36 +144,15 @@ async function fetchTimetablesWithSchoolGridFallback(
     return timetables;
 }
 
-function getTeacherConflicts(
+async function getTeacherConflicts(
     schoolId: string,
     dayOfWeek: number,
     slots: { teacherId?: string; startTime: string }[],
     excludeClassName?: string,
     excludeSection?: string
 ): Promise<string[]> {
-    const filter: any = { schoolId, dayOfWeek, isActive: true };
-    if (excludeClassName != null && excludeSection != null) {
-        filter.$nor = [{ className: excludeClassName, section: excludeSection }];
-    }
-    return Timetable.find(filter)
-        .populate('slots.teacherId', 'name')
-        .lean()
-        .then((docs) => {
-            const conflicts: string[] = [];
-            const teacherSlots = (docs as any[]).flatMap((d) =>
-                (d.slots || [])
-                    .filter((s: any) => s.teacherId)
-                    .map((s: any) => ({ teacherId: s.teacherId?._id?.toString(), teacherName: s.teacherId?.name, startTime: s.startTime, classInfo: `${d.className} ${d.section}` }))
-            );
-            slots.forEach((slot) => {
-                if (!slot.teacherId) return;
-                const same = teacherSlots.find(
-                    (t) => t.teacherId === slot.teacherId && t.startTime === slot.startTime
-                );
-                if (same) conflicts.push(`Teacher ${same.teacherName || slot.teacherId} is already assigned at ${slot.startTime} in ${same.classInfo}`);
-            });
-            return conflicts;
-        });
+    // Disabled per user request to allow same teacher in multiple classes for testing.
+    return [];
 }
 
 class TimetableController {
@@ -379,12 +358,31 @@ class TimetableController {
             const section = String(req.query.section || '').trim().toUpperCase();
 
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true }).lean();
-            const periodCount = settings?.periodCount ?? 7;
-            const firstPeriodStart = settings?.firstPeriodStart || '08:00';
-            const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
-            const normBreaks = normalizeTimetableBreaks(settings || {});
+            
+            let effectiveSettings: any = settings || {};
+            if (className && settings?.classSettings) {
+                const override = settings.classSettings.find(
+                    (cs: any) =>
+                        normTimetableClassName(cs.className) === normTimetableClassName(className) &&
+                        String(cs.section || 'A').toUpperCase() === (section || 'A')
+                );
+                if (override) {
+                    effectiveSettings = {
+                        ...effectiveSettings,
+                        periodCount: override.periodCount,
+                        firstPeriodStart: override.firstPeriodStart,
+                        periodDurationMinutes: override.periodDurationMinutes,
+                        breaks: override.breaks,
+                    };
+                }
+            }
+
+            const periodCount = effectiveSettings.periodCount ?? 7;
+            const firstPeriodStart = effectiveSettings.firstPeriodStart || '08:00';
+            const periodDurationMinutes = effectiveSettings.periodDurationMinutes ?? 40;
+            const normBreaks = normalizeTimetableBreaks(effectiveSettings);
             const totalCols = timetableColumnCount(periodCount, firstPeriodStart, periodDurationMinutes, normBreaks);
-            const scheduleColumns = buildScheduleColumnDtos(settings as any);
+            const scheduleColumns = buildScheduleColumnDtos(effectiveSettings);
 
             // If className/section provided, return per-day grid for that specific class
             if (className) {
@@ -415,7 +413,7 @@ class TimetableController {
                     };
                 });
 
-                return sendResponse(res, { settings, scheduleColumns, totalCols, rows }, 'Class-specific grid retrieved', 200);
+                return sendResponse(res, { settings: effectiveSettings, scheduleColumns, totalCols, rows }, 'Class-specific grid retrieved', 200);
             }
 
             const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
@@ -499,15 +497,35 @@ class TimetableController {
             if (!school) return next(new ErrorResponse('School not found', 404));
             const session = await Session.findOne({ schoolId: req.schoolId, isActive: true });
             const sessionYear = session ? (session as any).sessionYear?.replace('-', '–') : '2025–26';
+            
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true });
             const settingsObj = settings ? settings.toObject() : null;
-            const periodCount = settingsObj?.periodCount ?? 7;
-            const lunchAfterPeriod = settingsObj?.lunchAfterPeriod ?? 4;
-            const firstPeriodStart = settingsObj?.firstPeriodStart || '08:00';
-            const periodDurationMinutes = settingsObj?.periodDurationMinutes ?? 40;
-            const lunchBreakDuration = settingsObj?.lunchBreakDuration ?? 40;
-            const breakLabel = settingsObj?.breakLabel || 'Lunch Break';
-            const breaks = normalizeTimetableBreaks(settingsObj || {});
+
+            let effectiveSettings: any = settingsObj || {};
+            if (className && settingsObj?.classSettings) {
+                const override = settingsObj.classSettings.find(
+                    (cs: any) =>
+                        normTimetableClassName(cs.className) === normTimetableClassName(className) &&
+                        String(cs.section || 'A').toUpperCase() === (section || 'A')
+                );
+                if (override) {
+                    effectiveSettings = {
+                        ...effectiveSettings,
+                        periodCount: override.periodCount,
+                        firstPeriodStart: override.firstPeriodStart,
+                        periodDurationMinutes: override.periodDurationMinutes,
+                        breaks: override.breaks,
+                    };
+                }
+            }
+
+            const periodCount = effectiveSettings.periodCount ?? 7;
+            const lunchAfterPeriod = effectiveSettings.lunchAfterPeriod ?? 4;
+            const firstPeriodStart = effectiveSettings.firstPeriodStart || '08:00';
+            const periodDurationMinutes = effectiveSettings.periodDurationMinutes ?? 40;
+            const lunchBreakDuration = effectiveSettings.lunchBreakDuration ?? 40;
+            const breakLabel = effectiveSettings.breakLabel || 'Lunch Break';
+            const breaks = normalizeTimetableBreaks(effectiveSettings);
 
             // If className provided, generate single-class weekly PDF
             if (className) {
