@@ -16,7 +16,7 @@ function staffIdentityKey(name?: string, phone?: string): string | null {
     return `${n}|${p}`;
 }
 
-const MANAGER_ONLINE_WINDOW_MS = 10_000;
+const MANAGER_ONLINE_WINDOW_MS = 60_000; // 60 seconds (matches BUS_LOCATION_STALE_MS)
 
 /**
  * Before saving a bus: remove this driver/conductor from every other bus in the school.

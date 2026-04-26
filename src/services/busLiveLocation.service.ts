@@ -5,11 +5,11 @@ import { UserRole } from '../types';
 import { getSocketIOServer } from '../lib/socketIoRegistry';
 
 /** Ignore location writes closer than this (per bus). */
-const MIN_WRITE_INTERVAL_MS = 4000;
+const MIN_WRITE_INTERVAL_MS = 3000;
 /** Broadcast to subscribers at most this often unless moved significantly. */
-const MIN_BROADCAST_INTERVAL_MS = 5000;
+const MIN_BROADCAST_INTERVAL_MS = 4000;
 /** If moved farther than this (meters), broadcast even if interval not met. */
-const MIN_BROADCAST_DISTANCE_M = 12;
+const MIN_BROADCAST_DISTANCE_M = 10;
 
 const lastWriteAt = new Map<string, number>();
 const lastBroadcastMeta = new Map<string, { t: number; lat: number; lng: number }>();
@@ -134,7 +134,7 @@ export async function applyCrewLocationUpdate(params: {
 }
 
 /** Consider bus "live" if updated within this window (ms). */
-export const BUS_LOCATION_STALE_MS = 120_000;
+export const BUS_LOCATION_STALE_MS = 60_000;
 
 export async function getLatestLocationForBus(busObjectId: mongoose.Types.ObjectId) {
     return BusLocation.findOne({ busId: busObjectId }).lean();

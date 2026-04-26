@@ -51,7 +51,6 @@ attachBusTrackingSocket(io);
 app.use(statusMonitor({
     path: '/system-status',
     title: 'SMS Backend Status',
-    websocket: io,
     healthChecks: [{
         protocol: 'http',
         host: 'localhost',
