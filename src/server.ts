@@ -36,7 +36,7 @@ const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
     path: '/socket.io',
     cors: {
-        origin: (origin, callback) => {
+        origin: (_origin, callback) => {
             // Allow all origins for mobile/web flexibility
             callback(null, true);
         },
