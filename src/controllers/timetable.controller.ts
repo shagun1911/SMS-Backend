@@ -375,18 +375,55 @@ class TimetableController {
 
     async getGrid(req: AuthRequest, res: Response, next: NextFunction) {
         try {
+            const className = String(req.query.className || '').trim();
+            const section = String(req.query.section || '').trim().toUpperCase();
+
             const settings = await TimetableSettings.findOne({ schoolId: req.schoolId, isActive: true }).lean();
-            const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
-                .populate('rows.cells.teacherId', 'name')
-                .lean();
-            const classes = await Class.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1, section: 1 }).lean();
-            const rows = (grid as any)?.rows || [];
             const periodCount = settings?.periodCount ?? 7;
             const firstPeriodStart = settings?.firstPeriodStart || '08:00';
             const periodDurationMinutes = settings?.periodDurationMinutes ?? 40;
             const normBreaks = normalizeTimetableBreaks(settings || {});
             const totalCols = timetableColumnCount(periodCount, firstPeriodStart, periodDurationMinutes, normBreaks);
             const scheduleColumns = buildScheduleColumnDtos(settings as any);
+
+            // If className/section provided, return per-day grid for that specific class
+            if (className) {
+                const secNorm = section || 'A';
+                const timetables = await fetchTimetablesWithSchoolGridFallback(req.schoolId!, className, secNorm);
+                
+                const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const workingDays: string[] = (settings as any)?.workingDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const WORKING_DAYS_MAP: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+                const allowedNums = workingDays.map(d => WORKING_DAYS_MAP[d]);
+
+                const rows = allowedNums.map(dayNum => {
+                    const dayTt = timetables.find(t => t.dayOfWeek === dayNum);
+                    const slots = dayTt?.slots || [];
+                    const cells = scheduleColumns.map(col => {
+                        if (col.kind === 'break') return { subject: col.label };
+                        const slot = slots.find((s: any) => s.startTime === col.startTime && s.type === 'period');
+                        return {
+                            subject: slot?.subject || '',
+                            teacherId: slot?.teacherId?._id || slot?.teacherId,
+                            teacherName: slot?.teacherId?.name,
+                        };
+                    });
+                    return {
+                        className: `${className}-${secNorm}`,
+                        section: DAY_NAMES[dayNum],
+                        cells
+                    };
+                });
+
+                return sendResponse(res, { settings, scheduleColumns, totalCols, rows }, 'Class-specific grid retrieved', 200);
+            }
+
+            const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
+                .populate('rows.cells.teacherId', 'name')
+                .lean();
+            const classes = await Class.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1, section: 1 }).lean();
+            const rows = (grid as any)?.rows || [];
+            
             const rowsWithCells = (classes as any[]).map((cls) => {
                 const existing = rows.find((r: any) => r.className === cls.className && (r.section || 'A') === (cls.section || 'A'));
                 const cells = existing?.cells?.length ? existing.cells : Array.from({ length: totalCols }, () => ({}));
@@ -455,6 +492,9 @@ class TimetableController {
 
     async printGrid(req: AuthRequest, res: Response, next: NextFunction) {
         try {
+            const className = String(req.query.className || '').trim();
+            const section = String(req.query.section || '').trim().toUpperCase();
+
             const school = await School.findById(req.schoolId);
             if (!school) return next(new ErrorResponse('School not found', 404));
             const session = await Session.findOne({ schoolId: req.schoolId, isActive: true });
@@ -468,6 +508,50 @@ class TimetableController {
             const lunchBreakDuration = settingsObj?.lunchBreakDuration ?? 40;
             const breakLabel = settingsObj?.breakLabel || 'Lunch Break';
             const breaks = normalizeTimetableBreaks(settingsObj || {});
+
+            // If className provided, generate single-class weekly PDF
+            if (className) {
+                const secNorm = section || 'A';
+                const timetables = await fetchTimetablesWithSchoolGridFallback(req.schoolId!, className, secNorm);
+                
+                // Fetch class for teacher name
+                const cls = await Class.findOne({ schoolId: req.schoolId, className, section: secNorm }).populate('classTeacherId', 'name');
+                const classTeacherName = (cls as any)?.classTeacherId?.name;
+
+                const days = (timetables as any[]).map((t) => ({
+                    dayOfWeek: t.dayOfWeek,
+                    slots: (t.slots || []).map((s: any) => ({
+                        startTime: s.startTime,
+                        endTime: s.endTime,
+                        subject: s.subject,
+                        title: s.title,
+                        type: s.type,
+                        teacherName: s.teacherId?.name,
+                    })),
+                }));
+
+                const buffer = await generateTimetablePDF({
+                    school,
+                    sessionYear: sessionYear || '2025–26',
+                    className,
+                    section: secNorm,
+                    classTeacherName,
+                    periodCount,
+                    lunchAfterPeriod,
+                    firstPeriodStart,
+                    periodDurationMinutes,
+                    lunchBreakDuration,
+                    breakLabel,
+                    breaks,
+                    days,
+                });
+
+                res.setHeader('Content-Type', 'application/pdf');
+                const isPreview = req.query.preview === '1' || req.query.preview === 'true';
+                res.setHeader('Content-Disposition', isPreview ? 'inline' : `attachment; filename=timetable-${className}-${secNorm}.pdf`);
+                return res.send(buffer);
+            }
+
             const grid = await SchoolTimetableGrid.findOne({ schoolId: req.schoolId, isActive: true })
                 .populate('rows.cells.teacherId', 'name')
                 .lean();
