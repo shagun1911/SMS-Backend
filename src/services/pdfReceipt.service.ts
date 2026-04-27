@@ -215,11 +215,20 @@ export async function generateReceiptPDF(opts: ReceiptPDFOptions): Promise<Buffe
     hLine(doc, y, '#546e7a', 1);
     y += 1;
 
-    const netFee = totalAnnualFee + lateFee - concession;
-    const balance = remainingDue;
+    // Calculate total from feeComponents if available, otherwise use totalAnnualFee
+    const totalFromComponents = feeComponents && feeComponents.length > 0
+        ? feeComponents.reduce((sum, item) => sum + item.amount, 0)
+        : totalAnnualFee;
+
+    // Use the component sum for display to ensure it matches the table above
+    const displayTotalFee = totalFromComponents;
+    const netFee = displayTotalFee + lateFee - concessionValueForRow;
+    // Calculate balance based on net fee and payments (not using the passed remainingDue which may be based on old logic)
+    const totalPaidToDate = previousPaid + thisPayment;
+    const balance = Math.max(0, netFee - totalPaidToDate);
 
     const sumRows: { label: string; value: number; fg: string; bg: string; bold: boolean }[] = [
-        { label: 'Total Fee', value: totalAnnualFee, fg: '#111827', bg: '#eef2ff', bold: false },
+        { label: 'Total Fee', value: displayTotalFee, fg: '#111827', bg: '#eef2ff', bold: false },
         {
             label: '(+) Old Balance',
             value: payment.previousDue > thisPayment + remainingDue ? payment.previousDue - thisPayment - remainingDue : 0,

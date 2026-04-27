@@ -21,9 +21,40 @@ import {
     countChargeableSessionMonths,
     recurringAnnualMultiplier,
 } from '../utils/feeExemptMonths';
+import {
+    computeReceiptAlignedStudentTotals,
+    totalAnnualConcessionOnMonthly as sharedAnnualConcessionOnMonthly,
+} from '../utils/feeCalculator';
 import { cache } from '../utils/cache';
 
 class FeeService {
+    private async findFeeStructureForStudentClass(
+        schoolId: string,
+        sessionId: string,
+        studentClassRaw: any
+    ): Promise<any | null> {
+        const raw = String(studentClassRaw || '').trim();
+        if (!raw) return null;
+
+        const candidates = new Set<string>();
+        const push = (v: string) => {
+            const x = String(v || '').trim();
+            if (x) candidates.add(x);
+        };
+
+        push(raw);
+        push(raw.replace(/^class\s+/i, ''));
+        push(raw.split(' ')[0]);
+        push(raw.split('-')[0]);
+        push(raw.replace(/^class\s+/i, '').split('-')[0]);
+
+        for (const cls of candidates) {
+            const structure = await FeeStructureRepository.findByClass(schoolId, sessionId, cls);
+            if (structure) return structure;
+        }
+        return null;
+    }
+
     private invalidateFeeCachesForSchool(schoolId: string) {
         cache.delPrefix(`fees:stats:${schoolId}`);
         cache.delPrefix(`fees:defaulters:${schoolId}`);
@@ -37,11 +68,7 @@ class FeeService {
      * (per-month total × session months). Capped at the annual recurring total. One-time fees are excluded.
      */
     private totalAnnualConcessionOnMonthly(student: any, annualRecurringTotal: number): number {
-        if (!annualRecurringTotal || annualRecurringTotal <= 0) return 0;
-        const flat = Math.max(0, Math.round(Number(student?.concessionAmount) || 0));
-        const pct = Math.min(100, Math.max(0, Number(student?.concessionPercent) || 0));
-        const fromPct = pct > 0 ? Math.round((annualRecurringTotal * pct) / 100) : 0;
-        return Math.min(annualRecurringTotal, flat + fromPct);
+        return sharedAnnualConcessionOnMonthly(student, annualRecurringTotal);
     }
 
     private async resolveTransportMonthlyFee(student: any): Promise<{ amount: number; title?: string }> {
@@ -422,6 +449,7 @@ class FeeService {
 
         const previousPaid = Number(student.paidAmount) || 0;
         let totalYearly = Number(student.totalYearlyFee) || 0;
+        let grossTotalYearly = totalYearly; // Default to current total if no recalculation
         let cachedFeeStructure: any = null;
         if (student.class) {
             cachedFeeStructure = await FeeStructureRepository.findByClass(
@@ -460,7 +488,8 @@ class FeeService {
                 const annualRecurring = monthlyTotal * chargeableCount;
                 const concession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
                 const adjustedAnnualRecurring = Math.max(0, annualRecurring - concession);
-                totalYearly = adjustedAnnualRecurring + oneTimeTotal;
+                grossTotalYearly = annualRecurring + oneTimeTotal; // Gross total before concession
+                totalYearly = adjustedAnnualRecurring + oneTimeTotal; // Net total after concession
                 const recomputedDue = Math.max(0, totalYearly - previousPaid);
 
                 await StudentRepository.update(payload.studentId, {
@@ -601,7 +630,7 @@ class FeeService {
             school,
             payment,
             student,
-            totalAnnualFee: totalYearly,
+            totalAnnualFee: grossTotalYearly || totalYearly,
             previousPaid,
             thisPayment: payload.amountPaid,
             remainingDue,
@@ -641,6 +670,11 @@ class FeeService {
     ): Promise<{
         student: any;
         payments: IFeePayment[];
+        totalFeeBeforeConcession?: number;
+        concessionAmount?: number;
+        totalFeeAfterConcession?: number;
+        paidAmount?: number;
+        dueAmount?: number;
         monthlyFee?: number;
         oneTimeFee?: number;
         feeExemptMonths?: string[];
@@ -665,18 +699,11 @@ class FeeService {
         if (studentClass) {
             const session = await SessionRepository.findActive(schoolId);
             if (session) {
-                let structure = await FeeStructureRepository.findByClass(
+                let structure = await this.findFeeStructureForStudentClass(
                     schoolId,
                     session._id.toString(),
                     studentClass
                 );
-                if (!structure && typeof studentClass === 'string' && studentClass.includes(' ')) {
-                    structure = await FeeStructureRepository.findByClass(
-                        schoolId,
-                        session._id.toString(),
-                        studentClass.split(' ')[0]
-                    );
-                }
                 if (structure) {
                     const rawItems: Array<{ amount: number; type?: string }> =
                         (structure as any).components && (structure as any).components.length > 0
@@ -701,25 +728,17 @@ class FeeService {
                     if (transport.amount > 0) monthlyTotal += transport.amount;
 
                     const sessionMonths = getSessionYearMonths(session);
-                    const exemptCanon = normalizeFeeExemptMonths(
-                        (structure as any).feeExemptMonths,
-                        sessionMonths.map((m) => m.monthName)
-                    );
-                    const chargeableCount = Math.max(
-                        1,
-                        countChargeableSessionMonths(sessionMonths, exemptCanon)
-                    );
-                    const annualRecurring = monthlyTotal * chargeableCount;
-                    const studentConcession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
-                    let effectiveMonthlyFee = monthlyTotal;
-                    if (studentConcession > 0 && monthlyTotal > 0) {
-                        effectiveMonthlyFee = Math.max(
-                            0,
-                            Math.round((annualRecurring - studentConcession) / chargeableCount)
-                        );
-                    }
+                    const canonicalTotals = computeReceiptAlignedStudentTotals({
+                        student,
+                        structure,
+                        session,
+                        transportMonthlyFee: transport.amount,
+                    });
 
-                    monthlyFee = effectiveMonthlyFee > 0 ? effectiveMonthlyFee : undefined;
+                    monthlyFee =
+                        canonicalTotals.effectiveMonthlyFee > 0
+                            ? canonicalTotals.effectiveMonthlyFee
+                            : undefined;
                     oneTimeFee = oneTimeTotal > 0 ? oneTimeTotal : undefined;
 
                     await this.ensureStudentFeeLedgerForActiveSession(schoolId, student, {
@@ -742,29 +761,65 @@ class FeeService {
                             status: String(f?.status || 'pending'),
                         };
                     });
-                    const feeExemptMonthsOut = Array.from(exemptCanon);
+                    const feeExemptMonthsOut = canonicalTotals.feeExemptMonths;
+                    const totalFeeBeforeConcession = canonicalTotals.grossAnnual;
+                    // Keep concession exactly aligned with receipt PDF row logic.
+                    const concessionAmount =
+                        this.concessionAnnualDisplayForReceipt(student, structure as any, session) ??
+                        canonicalTotals.concessionAnnual;
+                    const totalFeeAfterConcession = Math.max(
+                        0,
+                        totalFeeBeforeConcession - concessionAmount
+                    );
+
+                    // Paid shown to users should reflect real receipts (same source used by receipt list).
+                    const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
+                    const canonicalPaid = payments.reduce(
+                        (sum: number, p: any) => sum + (Number(p?.amountPaid) || 0),
+                        0
+                    );
+                    const canonicalDue = Math.max(0, totalFeeAfterConcession - canonicalPaid);
+
+                    // Keep the student aggregate amounts aligned with ledger values.
+                    // This ensures Student profile, fee pages, and receipt math stay consistent.
+                    const currentStudentTotal = Number((student as any).totalYearlyFee) || 0;
+                    const currentStudentPaid = Number((student as any).paidAmount) || 0;
+                    const currentStudentDue = Number((student as any).dueAmount) || 0;
+
+                    const hasAggregateDrift =
+                        Math.abs(currentStudentTotal - totalFeeAfterConcession) > 0.0001 ||
+                        Math.abs(currentStudentPaid - canonicalPaid) > 0.0001 ||
+                        Math.abs(currentStudentDue - canonicalDue) > 0.0001;
 
                     // Back-fill totalYearlyFee on student if it was missing.
-                    if (totalFromStudent === 0) {
-                        const mult = recurringAnnualMultiplier(
-                            structure as any,
-                            sessionMonths.length,
-                            exemptCanon
-                        );
-                        const annualTotal =
-                            structure.totalAmount ??
-                            structure.totalAnnualFee ??
-                            monthlyTotal * mult + oneTimeTotal;
+                    if (totalFromStudent === 0 || hasAggregateDrift) {
+                        const targetTotal = totalFromStudent === 0 && totalFeeAfterConcession <= 0
+                            ? (structure.totalAmount ??
+                                structure.totalAnnualFee ??
+                                monthlyTotal *
+                                    canonicalTotals.multiplier +
+                                    oneTimeTotal)
+                            : totalFeeAfterConcession;
+                        const targetPaid = totalFromStudent === 0 && totalFeeAfterConcession <= 0
+                            ? Number((student as any).paidAmount) || 0
+                            : canonicalPaid;
+                        const targetDue = Math.max(0, targetTotal - targetPaid);
+
                         await StudentRepository.update(studentId, {
-                            totalYearlyFee: annualTotal,
-                            dueAmount: annualTotal - ((student as any).paidAmount ?? 0),
+                            totalYearlyFee: targetTotal,
+                            paidAmount: targetPaid,
+                            dueAmount: targetDue,
                         } as any);
                         const updated = await StudentRepository.findById(studentId);
                         if (updated) {
-                            const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
                             return {
                                 student: updated,
                                 payments,
+                                totalFeeBeforeConcession,
+                                concessionAmount,
+                                totalFeeAfterConcession,
+                                paidAmount: targetPaid,
+                                dueAmount: targetDue,
                                 monthlyFee,
                                 oneTimeFee,
                                 feeExemptMonths: feeExemptMonthsOut,
@@ -773,10 +828,19 @@ class FeeService {
                         }
                     }
 
-                    const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
                     return {
-                        student,
+                        student: {
+                            ...(student as any),
+                            totalYearlyFee: totalFeeAfterConcession,
+                            paidAmount: canonicalPaid,
+                            dueAmount: canonicalDue,
+                        } as any,
                         payments,
+                        totalFeeBeforeConcession,
+                        concessionAmount,
+                        totalFeeAfterConcession,
+                        paidAmount: canonicalPaid,
+                        dueAmount: canonicalDue,
                         monthlyFee,
                         oneTimeFee,
                         feeExemptMonths: feeExemptMonthsOut,
@@ -786,7 +850,17 @@ class FeeService {
             }
         }
         const payments = await FeePaymentRepository.findByStudent(schoolId, studentId);
-        return { student, payments, monthlyFee, oneTimeFee };
+        return {
+            student,
+            payments,
+            totalFeeBeforeConcession: Number((student as any).totalYearlyFee) || 0,
+            concessionAmount: 0,
+            totalFeeAfterConcession: Number((student as any).totalYearlyFee) || 0,
+            paidAmount: Number((student as any).paidAmount) || 0,
+            dueAmount: Number((student as any).dueAmount) || 0,
+            monthlyFee,
+            oneTimeFee,
+        };
     }
 
     async getReceiptPdf(schoolId: string, receiptId: string): Promise<Buffer> {
