@@ -48,8 +48,8 @@ class AuthService {
         }
         const tokens = this.generateAuthTokens(user);
 
-        // Store refresh token
-        await UserRepository.updateRefreshToken(user._id.toString(), tokens.refreshToken);
+        // Store refresh token per-device/session (multi-device safe).
+        await UserRepository.addRefreshToken(user._id.toString(), tokens.refreshToken);
 
         return { user, tokens };
     }
@@ -124,8 +124,8 @@ class AuthService {
 
         const tokens = this.generateAuthTokens(user);
 
-        // Rotate refresh token
-        await UserRepository.updateRefreshToken(user._id.toString(), tokens.refreshToken);
+        // Store refresh token per-device/session (multi-device safe).
+        await UserRepository.addRefreshToken(user._id.toString(), tokens.refreshToken);
 
         // Avoid full document save() here — legacy super-admin rows may have empty/invalid phone;
         // lastLogin update does not need to re-run validators on the whole user.
@@ -141,22 +141,26 @@ class AuthService {
     async refreshAuth(refreshToken: string): Promise<{ user: IUser; tokens: IAuthTokens }> {
         try {
             const decoded: any = jwt.verify(refreshToken, config.jwt.refreshSecret);
-            const user = await UserRepository.findById(decoded.id);
+            const user = await UserRepository.findByIdWithRefreshTokens(decoded.id);
 
             if (!user) {
                 throw new ErrorResponse('User not found', 401);
             }
 
-            if (config.env === 'production' && user.refreshToken !== refreshToken) { // Optional: enforce strict token matching
-                // In strict mode, if refresh token doesn't match DB, it might be stolen/reused.
-                // We could invalidate all tokens here for security.
+            const refreshTokens = Array.isArray((user as any).refreshTokens) ? (user as any).refreshTokens : [];
+            const legacyRefreshToken = (user as any).refreshToken;
+            const hasToken =
+                refreshTokens.includes(refreshToken) ||
+                (!!legacyRefreshToken && legacyRefreshToken === refreshToken);
+
+            if (!hasToken) {
                 throw new ErrorResponse('Invalid refresh token', 401);
             }
 
             const tokens = this.generateAuthTokens(user);
 
-            // Rotate refresh token
-            await UserRepository.updateRefreshToken(user._id.toString(), tokens.refreshToken);
+            // Rotate only the current device/session token.
+            await UserRepository.replaceRefreshToken(user._id.toString(), refreshToken, tokens.refreshToken);
 
             return { user, tokens };
         } catch (error) {
@@ -167,8 +171,8 @@ class AuthService {
     /**
      * Logout user
      */
-    async logout(userId: string): Promise<void> {
-        await UserRepository.clearRefreshToken(userId);
+    async logout(userId: string, refreshToken?: string): Promise<void> {
+        await UserRepository.clearRefreshToken(userId, refreshToken);
     }
 
     /**

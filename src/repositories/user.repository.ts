@@ -34,16 +34,48 @@ class UserRepository extends BaseRepository<IUser> {
         return await this.find(query);
     }
 
-    async updateRefreshToken(userId: string, refreshToken: string): Promise<void> {
-        await this.model.findByIdAndUpdate(userId, { refreshToken }).exec();
+    async addRefreshToken(userId: string, refreshToken: string): Promise<void> {
+        await this.model
+            .findByIdAndUpdate(userId, {
+                $addToSet: { refreshTokens: refreshToken },
+                // keep legacy field for backward compatibility during migration
+                refreshToken,
+            })
+            .exec();
+    }
+
+    async findByIdWithRefreshTokens(userId: string): Promise<IUser | null> {
+        return await this.model.findById(userId).select('+refreshTokens +refreshToken').exec();
+    }
+
+    async replaceRefreshToken(userId: string, oldToken: string, newToken: string): Promise<void> {
+        await this.model
+            .findByIdAndUpdate(userId, {
+                $pull: { refreshTokens: oldToken },
+            })
+            .exec();
+        await this.model
+            .findByIdAndUpdate(userId, {
+                $addToSet: { refreshTokens: newToken },
+                refreshToken: newToken,
+            })
+            .exec();
     }
 
     async updateLastLogin(userId: string): Promise<void> {
         await this.model.findByIdAndUpdate(userId, { lastLogin: new Date() }).exec();
     }
 
-    async clearRefreshToken(userId: string): Promise<void> {
-        await this.model.findByIdAndUpdate(userId, { refreshToken: null }).exec();
+    async clearRefreshToken(userId: string, refreshToken?: string): Promise<void> {
+        if (refreshToken) {
+            await this.model
+                .findByIdAndUpdate(userId, {
+                    $pull: { refreshTokens: refreshToken },
+                })
+                .exec();
+            return;
+        }
+        await this.model.findByIdAndUpdate(userId, { refreshToken: null, refreshTokens: [] }).exec();
     }
 }
 

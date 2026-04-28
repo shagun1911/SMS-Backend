@@ -163,7 +163,11 @@ class AuthController {
      */
     async logout(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
-            await AuthService.logout((req as any).user.id);
+            const refreshToken =
+                (req.body && (req.body as any).refreshToken) ||
+                (req.query && (req.query as any).refreshToken) ||
+                req.headers['x-refresh-token'];
+            await AuthService.logout((req as any).user.id, typeof refreshToken === 'string' ? refreshToken : undefined);
 
             res.status(200).json({
                 success: true,

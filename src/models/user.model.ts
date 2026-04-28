@@ -143,6 +143,11 @@ const userSchema = new Schema<IUser, IUserModel>(
             type: String,
             select: false,
         },
+        refreshTokens: {
+            type: [String],
+            default: [],
+            select: false,
+        },
         fcmTokens: {
             type: [String],
             default: [],

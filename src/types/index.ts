@@ -52,6 +52,7 @@ export interface IUser extends Document {
     mustChangePassword?: boolean;
     permissions?: string[];
     refreshToken?: string;
+    refreshTokens?: string[];
     /** FCM registration tokens for this staff user (multiple devices). */
     fcmTokens?: string[];
     createdAt: Date;

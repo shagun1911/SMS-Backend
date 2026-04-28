@@ -13,6 +13,7 @@ interface IConfig {
         refreshSecret: string;
         accessExpire: string;
         refreshExpire: string;
+        enforceRefreshRotation: boolean;
     };
     cloudinary: {
         cloudName: string;
@@ -81,6 +82,7 @@ const config: IConfig = {
         refreshSecret: process.env.JWT_REFRESH_SECRET || 'refresh-secret-key',
         accessExpire: process.env.JWT_ACCESS_EXPIRE || '15m',
         refreshExpire: process.env.JWT_REFRESH_EXPIRE || '7d',
+        enforceRefreshRotation: process.env.JWT_ENFORCE_REFRESH_ROTATION === 'true',
     },
     cloudinary: (() => {
         const accounts: Array<{ cloudName: string; apiKey: string; apiSecret: string }> = [];
