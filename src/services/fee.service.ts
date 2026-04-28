@@ -102,12 +102,7 @@ class FeeService {
             if (t === 'monthly') monthlyTotal += item.amount;
         }
         const sessionMonths = getSessionYearMonths(session);
-        const exemptCanon = normalizeFeeExemptMonths(
-            (feeStructure as any).feeExemptMonths,
-            sessionMonths.map((m) => m.monthName)
-        );
-        const chargeableCount = Math.max(1, countChargeableSessionMonths(sessionMonths, exemptCanon));
-        const annualRecurring = monthlyTotal * chargeableCount;
+        const annualRecurring = monthlyTotal * Math.max(1, sessionMonths.length);
         const total = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
         return total > 0 ? total : undefined;
     }
@@ -144,22 +139,19 @@ class FeeService {
                       type: f.type,
                   }));
 
-        const monthlyItems = rawItems.filter((x: any) => (x.type || '').toString().toLowerCase() === 'monthly');
+        const regularMonthlyItems = rawItems.filter((x: any) => (x.type || '').toString().toLowerCase() === 'monthly');
         const oneTimeItems = rawItems.filter((x: any) => {
             const t = (x.type || '').toString().toLowerCase();
             return t === 'one-time' || t === 'one_time' || t === 'one time';
         });
 
         const transport = await this.resolveTransportMonthlyFee(student);
-        if (transport.amount > 0) {
-            monthlyItems.push({
-                title: transport.title || 'Transport Fee',
-                amount: transport.amount,
-                type: 'monthly',
-            });
-        }
 
-        const monthlyTotal = monthlyItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
+        const regularMonthlyTotal = regularMonthlyItems.reduce(
+            (sum: number, x: any) => sum + (Number(x.amount) || 0),
+            0
+        );
+        const transportMonthlyAmount = Math.max(0, Number(transport.amount) || 0);
         const oneTimeTotal = oneTimeItems.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0);
 
         const months = getSessionYearMonths(session);
@@ -167,27 +159,27 @@ class FeeService {
             (structure as any).feeExemptMonths,
             months.map((x) => x.monthName)
         );
-        const chargeableCount = countChargeableSessionMonths(months, exemptCanon);
-        if (chargeableCount <= 0) return;
+        const sessionMonthCount = months.length;
+        if (sessionMonthCount <= 0) return;
 
         // Apply student-level concession to monthly fee only (flat + % of annual recurring; one-time excluded).
-        const annualRecurring = monthlyTotal * chargeableCount;
-        const concession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
+        const annualRegular = regularMonthlyTotal * sessionMonthCount;
+        const concession = this.totalAnnualConcessionOnMonthly(student, annualRegular);
 
         // Important: don't use Math.round per-month here, because it can slightly change the
         // effective annual concession (e.g., 6000 turning into 5997) due to rounding drift.
         // Instead, distribute the remaining rupees across months so the TOTAL matches exactly.
         // Example: if annualMonthlyAfter = 5997 and months = 12 -> 9 months get +1.
-        const annualMonthlyAfter = concession > 0 && monthlyTotal > 0
-            ? Math.max(0, annualRecurring - concession)
-            : annualRecurring;
+        const annualRegularAfter = concession > 0 && regularMonthlyTotal > 0
+            ? Math.max(0, annualRegular - concession)
+            : annualRegular;
 
-        const annualMonthlyAfterInt = Math.round(annualMonthlyAfter);
-        const basePerMonth = chargeableCount > 0
-            ? Math.floor(annualMonthlyAfterInt / chargeableCount)
-            : annualMonthlyAfterInt;
-        const remainder = chargeableCount > 0
-            ? annualMonthlyAfterInt - (basePerMonth * chargeableCount)
+        const annualRegularAfterInt = Math.round(annualRegularAfter);
+        const baseRegularPerMonth = sessionMonthCount > 0
+            ? Math.floor(annualRegularAfterInt / sessionMonthCount)
+            : annualRegularAfterInt;
+        const regularRemainder = sessionMonthCount > 0
+            ? annualRegularAfterInt - (baseRegularPerMonth * sessionMonthCount)
             : 0;
 
         // Batch-fetch existing fee rows for this student+session to avoid N+1 DB calls
@@ -208,50 +200,43 @@ class FeeService {
             existingMonths = new Set(existingFees.map((f: any) => String(f.month)));
         }
 
-        // Monthly ledger entries (exempt session months: no charge, status exempt)
-        let chargeableIdx = 0;
+        // Monthly ledger entries:
+        // - regular monthly components are charged in all session months
+        // - exempt months waive transport fee only
+        let regularIdx = 0;
         for (const m of months) {
             if (existingMonths.has(m.monthName)) continue;
 
-            if (exemptCanon.has(m.monthName)) {
-                await StudentFeeRepository.create({
-                    schoolId: new Types.ObjectId(schoolId) as any,
-                    studentId: student._id,
-                    sessionId: session._id,
-                    month: m.monthName,
-                    feeBreakdown: monthlyItems.map((f: any) => ({
-                        title: f.title || f.name || 'Monthly Fee',
-                        amount: 0,
+            const adjustedRegularPerMonth =
+                regularIdx < regularRemainder ? baseRegularPerMonth + 1 : baseRegularPerMonth;
+            regularIdx++;
+            const transportForMonth = exemptCanon.has(m.monthName) ? 0 : transportMonthlyAmount;
+            const totalForMonth = adjustedRegularPerMonth + transportForMonth;
+            const feeBreakdown = [
+                ...regularMonthlyItems.map((f: any) => ({
+                    title: f.title || f.name || 'Monthly Fee',
+                    amount: Number(f.amount) || 0,
+                    type: 'monthly',
+                })),
+                ...(transportMonthlyAmount > 0
+                    ? [{
+                        title: transport.title || 'Transport Fee',
+                        amount: transportForMonth,
                         type: 'monthly',
-                    })),
-                    totalAmount: 0,
-                    paidAmount: 0,
-                    remainingAmount: 0,
-                    status: FeeStatus.EXEMPT,
-                    dueDate: new Date(m.year, m.month, 0, 23, 59, 59),
-                    payments: [],
-                    discount: 0,
-                    lateFee: 0,
-                } as any);
-                continue;
-            }
+                    }]
+                    : []),
+            ];
 
-            const adjustedMonthlyPerMonth = chargeableIdx < remainder ? basePerMonth + 1 : basePerMonth;
-            chargeableIdx++;
             await StudentFeeRepository.create({
                 schoolId: new Types.ObjectId(schoolId) as any,
                 studentId: student._id,
                 sessionId: session._id,
                 month: m.monthName,
-                feeBreakdown: monthlyItems.map((f: any) => ({
-                    title: f.title || f.name || 'Monthly Fee',
-                    amount: Number(f.amount) || 0,
-                    type: 'monthly',
-                })),
-                totalAmount: adjustedMonthlyPerMonth,
+                feeBreakdown,
+                totalAmount: totalForMonth,
                 paidAmount: 0,
-                remainingAmount: adjustedMonthlyPerMonth,
-                status: FeeStatus.PENDING,
+                remainingAmount: totalForMonth,
+                status: totalForMonth > 0 ? FeeStatus.PENDING : FeeStatus.EXEMPT,
                 dueDate: new Date(m.year, m.month, 0, 23, 59, 59), // last day of month
                 payments: [],
                 discount: 0,
@@ -311,13 +296,6 @@ class FeeService {
             (data as any).feeExemptMonths,
             sessionMonths.map((m) => m.monthName)
         );
-        if (exemptCanon.size >= sessionMonths.length) {
-            throw new ErrorResponse(
-                'At least one session month must remain chargeable (cannot exempt every month)',
-                400
-            );
-        }
-
         const payload: any = {
             ...data,
             schoolId: new Types.ObjectId(schoolId),
@@ -329,7 +307,7 @@ class FeeService {
         }
         payload.feeExemptMonths = exemptCanon.size > 0 ? Array.from(exemptCanon) : [];
         payload.monthlyMultiplier =
-            exemptCanon.size > 0 ? sessionMonths.length - exemptCanon.size : undefined;
+            exemptCanon.size > 0 ? Math.max(0, sessionMonths.length - exemptCanon.size) : undefined;
         return await FeeStructureRepository.create(payload);
     }
 
@@ -358,15 +336,9 @@ class FeeService {
                 rawExempt !== undefined
                     ? normalizeFeeExemptMonths(rawExempt, sessionMonths.map((m) => m.monthName))
                     : normalizeFeeExemptMonths(doc.feeExemptMonths, sessionMonths.map((m) => m.monthName));
-            if (exemptCanon.size >= sessionMonths.length) {
-                throw new ErrorResponse(
-                    'At least one session month must remain chargeable (cannot exempt every month)',
-                    400
-                );
-            }
             doc.feeExemptMonths = exemptCanon.size > 0 ? Array.from(exemptCanon) : [];
             doc.monthlyMultiplier =
-                exemptCanon.size > 0 ? sessionMonths.length - exemptCanon.size : undefined;
+                exemptCanon.size > 0 ? Math.max(0, sessionMonths.length - exemptCanon.size) : undefined;
         };
 
         if (data.components && data.components.length > 0) {
@@ -470,21 +442,23 @@ class FeeService {
                     else if (t === 'monthly') monthlyTotal += item.amount;
                 }
                 const transport = await this.resolveTransportMonthlyFee(student);
-                if (transport.amount > 0) monthlyTotal += transport.amount;
+                const transportMonthly = Math.max(0, Number(transport.amount) || 0);
 
                 const sessionMonthsForAnnual = getSessionYearMonths(session);
                 const exemptForAnnual = normalizeFeeExemptMonths(
                     (cachedFeeStructure as any).feeExemptMonths,
                     sessionMonthsForAnnual.map((m) => m.monthName)
                 );
-                const chargeableCount = Math.max(
-                    1,
+                const sessionMonthCount = Math.max(1, sessionMonthsForAnnual.length);
+                const transportChargeableCount = Math.max(
+                    0,
                     countChargeableSessionMonths(sessionMonthsForAnnual, exemptForAnnual)
                 );
-                const annualRecurring = monthlyTotal * chargeableCount;
-                const concession = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
-                const adjustedAnnualRecurring = Math.max(0, annualRecurring - concession);
-                grossTotalYearly = annualRecurring + oneTimeTotal; // Gross total before concession
+                const annualRegular = monthlyTotal * sessionMonthCount;
+                const annualTransport = transportMonthly * transportChargeableCount;
+                const concession = this.totalAnnualConcessionOnMonthly(student, annualRegular);
+                const adjustedAnnualRecurring = Math.max(0, annualRegular - concession) + annualTransport;
+                grossTotalYearly = annualRegular + annualTransport + oneTimeTotal; // Gross total before concession
                 totalYearly = adjustedAnnualRecurring + oneTimeTotal; // Net total after concession
                 const recomputedDue = Math.max(0, totalYearly - previousPaid);
 
@@ -577,7 +551,8 @@ class FeeService {
                     (feeStructureForReceipt as any).feeExemptMonths,
                     sm.map((m) => m.monthName)
                 );
-                const mult = recurringAnnualMultiplier(feeStructureForReceipt as any, sm.length, ex);
+                const regularMult = Math.max(1, sm.length);
+                const transportMult = recurringAnnualMultiplier(feeStructureForReceipt as any, sm.length, ex);
                 const items =
                     feeStructureForReceipt.components && feeStructureForReceipt.components.length > 0
                         ? feeStructureForReceipt.components
@@ -588,14 +563,14 @@ class FeeService {
                           }));
                 feeComponents = items.map((c: any) => ({
                     name: c.name,
-                    amount: c.type === 'one-time' ? c.amount : c.amount * mult,
+                    amount: c.type === 'one-time' ? c.amount : c.amount * regularMult,
                 }));
                 const transport = await this.resolveTransportMonthlyFee(student);
                 if (transport.amount > 0) {
                     if (!feeComponents) feeComponents = [];
                     feeComponents.push({
                         name: transport.title || 'Transport Fee',
-                        amount: transport.amount * mult,
+                        amount: transport.amount * transportMult,
                     });
                 }
             }
@@ -883,7 +858,8 @@ class FeeService {
                     (feeStructureForReceipt as any).feeExemptMonths,
                     sm.map((m) => m.monthName)
                 );
-                const mult = recurringAnnualMultiplier(feeStructureForReceipt as any, sm.length, ex);
+                const regularMult = Math.max(1, sm.length);
+                const transportMult = recurringAnnualMultiplier(feeStructureForReceipt as any, sm.length, ex);
                 const rawItems = ((feeStructureForReceipt.components ?? []).length > 0)
                     ? (feeStructureForReceipt.components ?? [])
                     : (feeStructureForReceipt.fees || []).map((f: any) => ({
@@ -893,14 +869,14 @@ class FeeService {
                       }));
                 feeComponents = rawItems.map((c: any) => ({
                     name: c.name,
-                    amount: c.type === 'one-time' ? c.amount : c.amount * mult,
+                    amount: c.type === 'one-time' ? c.amount : c.amount * regularMult,
                 }));
                 const transport = await this.resolveTransportMonthlyFee(student);
                 if (transport.amount > 0) {
                     if (!feeComponents) feeComponents = [];
                     feeComponents.push({
                         name: transport.title || 'Transport Fee',
-                        amount: transport.amount * mult,
+                        amount: transport.amount * transportMult,
                     });
                 }
             }
@@ -1340,19 +1316,24 @@ class FeeService {
                 }
 
                 const transport = await this.resolveTransportMonthlyFee(student);
-                if (transport.amount > 0) monthlyTotal += transport.amount;
+                const transportMonthly = Math.max(0, Number(transport.amount) || 0);
 
                 const sessionMonthsInit = getSessionYearMonths(session);
                 const exemptInit = normalizeFeeExemptMonths(
                     (structure as any).feeExemptMonths,
                     sessionMonthsInit.map((m) => m.monthName)
                 );
-                const chargeableInit = Math.max(1, countChargeableSessionMonths(sessionMonthsInit, exemptInit));
+                const sessionMonthCount = Math.max(1, sessionMonthsInit.length);
+                const transportChargeableCount = Math.max(
+                    0,
+                    countChargeableSessionMonths(sessionMonthsInit, exemptInit)
+                );
 
                 // Apply concession on recurring fees only (flat + % of annual monthly total).
-                const annualRecurring = monthlyTotal * chargeableInit;
-                const concessionTotal = this.totalAnnualConcessionOnMonthly(student, annualRecurring);
-                const adjustedMonthlyAnnual = Math.max(0, annualRecurring - concessionTotal);
+                const annualRegular = monthlyTotal * sessionMonthCount;
+                const annualTransport = transportMonthly * transportChargeableCount;
+                const concessionTotal = this.totalAnnualConcessionOnMonthly(student, annualRegular);
+                const adjustedMonthlyAnnual = Math.max(0, annualRegular - concessionTotal) + annualTransport;
 
                 // Annual = adjusted monthly total + all one-time components
                 const computedAnnual = adjustedMonthlyAnnual + oneTimeTotal;
@@ -1550,21 +1531,12 @@ class FeeService {
         );
         if (!structure) throw new ErrorResponse(`Fee structure not found for Class ${className}`, 404);
 
-        const sessionMonthsGen = getSessionYearMonths(session);
-        const exemptGen = normalizeFeeExemptMonths(
-            (structure as any).feeExemptMonths,
-            sessionMonthsGen.map((m) => m.monthName)
-        );
         // 2. Get Students in Class
         const students = await StudentRepository.find({
             schoolId,
             class: className,
             isActive: true
         });
-
-        if (exemptGen.has(month)) {
-            return { created: 0, skipped: students.length };
-        }
 
         let createdCount = 0;
         let skippedCount = 0;

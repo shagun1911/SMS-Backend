@@ -56,22 +56,26 @@ export function computeReceiptAlignedStudentTotals(input: {
         structure?.feeExemptMonths,
         sessionMonths.map((m) => m.monthName)
     );
-    const chargeableCount = Math.max(1, countChargeableSessionMonths(sessionMonths, exemptCanon));
+    const sessionMonthCount = Math.max(1, sessionMonths.length);
+    const transportChargeableCount = Math.max(0, countChargeableSessionMonths(sessionMonths, exemptCanon));
     const multiplier = recurringAnnualMultiplier(structure as any, sessionMonths.length, exemptCanon);
 
     // Concession rule: apply ONLY on regular monthly fees, never on bus/transport monthly fee.
-    const annualRecurringForConcession = baseMonthlyTotal * chargeableCount;
-    const annualRecurring = monthlyTotal * chargeableCount;
-    const grossAnnual = monthlyTotal * multiplier + oneTimeTotal;
+    // Exempt months waive transport only; regular monthly components remain chargeable.
+    const annualRecurringForConcession = baseMonthlyTotal * sessionMonthCount;
+    const annualTransport = transportMonthlyFee * transportChargeableCount;
+    const annualRecurring = annualRecurringForConcession + annualTransport;
+    const grossAnnual = annualRecurringForConcession + annualTransport + oneTimeTotal;
     const concessionAnnual = totalAnnualConcessionOnMonthly(student, annualRecurringForConcession);
     const netAnnual = Math.max(0, grossAnnual - concessionAnnual);
     const dueAmount = Math.max(0, netAnnual - paidAmount);
-    const effectiveMonthlyFee = chargeableCount > 0 ? (annualRecurring - concessionAnnual) / chargeableCount : 0;
+    const effectiveMonthlyFee =
+        sessionMonthCount > 0 ? (annualRecurring - concessionAnnual) / sessionMonthCount : 0;
 
     return {
         monthlyTotal,
         oneTimeTotal,
-        chargeableCount,
+        chargeableCount: transportChargeableCount,
         multiplier,
         annualRecurring,
         grossAnnual,

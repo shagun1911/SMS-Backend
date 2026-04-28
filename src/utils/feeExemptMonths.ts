@@ -77,11 +77,11 @@ export function recurringAnnualMultiplier(
     sessionMonthCount: number,
     exemptCanon: Set<string>
 ): number {
-    if (typeof structure.monthlyMultiplier === 'number' && structure.monthlyMultiplier > 0) {
+    if (typeof structure.monthlyMultiplier === 'number' && structure.monthlyMultiplier >= 0) {
         return structure.monthlyMultiplier;
     }
     if (exemptCanon.size > 0) {
-        return Math.max(1, sessionMonthCount - exemptCanon.size);
+        return Math.max(0, sessionMonthCount - exemptCanon.size);
     }
     return 12;
 }
