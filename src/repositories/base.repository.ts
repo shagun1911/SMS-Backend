@@ -52,4 +52,8 @@ export abstract class BaseRepository<T extends Document> implements IBaseReposit
     protected toObjectId(id: string): Types.ObjectId {
         return new Types.ObjectId(id);
     }
+
+    getModel(): Model<T> {
+        return this.model;
+    }
 }

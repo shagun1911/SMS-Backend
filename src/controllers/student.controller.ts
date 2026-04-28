@@ -303,6 +303,18 @@ class StudentController {
             next(error);
         }
     }
+
+    /**
+     * Get student counts by class
+     */
+    async getStudentCountsByClass(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const counts = await StudentService.getStudentCountsByClass(req.schoolId!);
+            sendResponse(res, counts, 'Student counts by class retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new StudentController();

@@ -365,6 +365,17 @@ class FeeController {
             next(error);
         }
     }
+
+    // GET Today's collection
+    async getTodayCollection(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const schoolId = req.schoolId!;
+            const collection = await FeeService.getTodayCollection(schoolId);
+            sendResponse(res, collection, 'Today\'s collection retrieved', 200);
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 export default new FeeController();

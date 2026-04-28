@@ -41,6 +41,11 @@ router.get(
     StudentController.getIdCardPdf
 );
 
+router.get(
+    '/counts-by-class',
+    StudentController.getStudentCountsByClass
+);
+
 router.post(
     '/:id/set-password',
     authorize(UserRole.SCHOOL_ADMIN),

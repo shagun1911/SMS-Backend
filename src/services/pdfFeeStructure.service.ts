@@ -96,9 +96,10 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
         }));
     const items = [...baseItems];
     const transportFee = Math.max(0, Number(transportMonthlyFee) || 0);
+    const transportTitle = transportDestinationName ? `Transport - ${transportDestinationName}` : 'Transport Fee';
     if (transportFee > 0) {
         items.push({
-            name: transportDestinationName ? `Transport - ${transportDestinationName}` : 'Transport Fee',
+            name: transportTitle,
             amount: transportFee,
             type: 'monthly',
         } as any);
@@ -111,8 +112,17 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     );
     const mult = recurringAnnualMultiplier(structure as any, sessionMonthsPdf.length, exemptCanonPdf);
 
-    const getAnnual = (item: { amount: number; type?: string }) =>
-        item.type === 'one-time' ? item.amount : item.amount * mult;
+    const isTransportItem = (item: { name?: string }) =>
+        typeof item?.name === 'string' &&
+        item.name.trim().toLowerCase() === transportTitle.trim().toLowerCase();
+
+    // Business rule: regular monthly fee components are annualized for full 12 months.
+    // Exempt months affect transport monthly fee only.
+    const getAnnual = (item: { name?: string; amount: number; type?: string }) => {
+        if (item.type === 'one-time') return item.amount;
+        if (isTransportItem(item)) return item.amount * mult;
+        return item.amount * 12;
+    };
 
     const totalAnnual = items.reduce((s: number, i: { amount: number; type?: string }) => s + getAnnual(i), 0);
 
@@ -120,7 +130,7 @@ export async function generateFeeStructurePDF(opts: FeeStructurePDFOptions): Pro
     // Exclude one-time components from Monthly/Quarterly/Half-Yearly/Yearly calculations.
     const recurringAnnual = items
         .filter((i: any) => (i.type || "").toString() !== "one-time")
-        .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0) * mult, 0);
+        .reduce((sum: number, i: any) => sum + getAnnual(i), 0);
     const recurringMonthly = items
         .filter((i: any) => (i.type || "").toString() !== "one-time")
         .reduce((sum: number, i: any) => sum + (Number(i.amount) || 0), 0);

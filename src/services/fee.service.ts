@@ -1837,6 +1837,39 @@ class FeeService {
     }
 
     /**
+     * Get today's collection with payment mode breakdown
+     */
+    async getTodayCollection(schoolId: string): Promise<{
+        total: number;
+        byPaymentMode: { mode: string; amount: number }[];
+        transactionCount: number;
+    }> {
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const FeePayment = (await import('../models/feePayment.model')).default;
+
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+        const [payments, count] = await Promise.all([
+            FeePayment.aggregate([
+                { $match: { schoolId: schoolObjId, paymentDate: { $gte: startOfDay, $lt: endOfDay } } },
+                { $group: { _id: '$paymentMode', amount: { $sum: '$amountPaid' } } },
+                { $sort: { amount: -1 } },
+            ]),
+            FeePayment.countDocuments({ schoolId: schoolObjId, paymentDate: { $gte: startOfDay, $lt: endOfDay } }),
+        ]);
+
+        const total = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const byPaymentMode = payments.map((p: any) => ({
+            mode: p._id || 'other',
+            amount: p.amount || 0,
+        }));
+
+        return { total, byPaymentMode, transactionCount: count };
+    }
+
+    /**
      * Get fee summary stats for dashboard (yearly + monthly fee data)
      */
     async getFeeStats(schoolId: string): Promise<{

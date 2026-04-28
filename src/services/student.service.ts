@@ -539,6 +539,21 @@ class StudentService {
 
         return `${prefix}${sequence.toString().padStart(4, '0')}`;
     }
+
+    /**
+     * Get student counts by class
+     */
+    async getStudentCountsByClass(schoolId: string): Promise<{ class: string; count: number }[]> {
+        const schoolObjId = new Types.ObjectId(schoolId);
+        const result = await Student.aggregate([
+            { $match: { schoolId: schoolObjId } },
+            { $group: { _id: '$class', count: { $sum: 1 } } },
+            { $sort: { _id: 1 } },
+            { $project: { class: '$_id', count: 1, _id: 0 } },
+        ]);
+        console.log("Student counts by class result:", result);
+        return result;
+    }
 }
 
 export default new StudentService();

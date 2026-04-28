@@ -474,3 +474,43 @@ export interface IServiceResponse<T = any> {
     error?: string;
     statusCode?: number;
 }
+
+// ============================================
+// ADMISSION ENQUIRY TYPES
+// ============================================
+
+export enum EnquiryStatus {
+    PENDING = 'pending',
+    FOLLOW_UP = 'follow_up',
+    CONVERTED = 'converted',
+    REJECTED = 'rejected',
+}
+
+export interface IAdmissionEnquiry extends Document {
+    _id: Types.ObjectId;
+    schoolId: Types.ObjectId;
+    studentName: string;
+    fatherName: string;
+    motherName: string;
+    dateOfBirth?: Date;
+    gender?: Gender;
+    class: string;
+    section?: string;
+    phone: string;
+    alternatePhone?: string;
+    email?: string;
+    address: {
+        street: string;
+        city: string;
+        state: string;
+        pincode: string;
+    };
+    enquiryDate: Date;
+    status: EnquiryStatus;
+    followUpDate?: Date;
+    notes?: string;
+    referredBy?: string;
+    previousSchool?: string;
+    createdAt: Date;
+    updatedAt: Date;
+}

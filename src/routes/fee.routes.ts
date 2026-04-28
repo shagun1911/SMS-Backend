@@ -53,6 +53,7 @@ router.get('/payments', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), F
 router.get('/student/:studentId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getStudentFees);
 router.get('/receipt/:receiptId', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getReceipt);
 router.get('/pending-current', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), expensiveReadLimiter, FeeController.getPendingCurrentMonth);
+router.get('/today-collection', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), FeeController.getTodayCollection);
 router.get('/defaulters', authorize(UserRole.SCHOOL_ADMIN, UserRole.ACCOUNTANT), expensiveReadLimiter, FeeController.getDefaulters);
 
 // Generation
