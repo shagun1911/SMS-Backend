@@ -413,16 +413,12 @@ class FeeService {
         const session = await SessionRepository.findActive(schoolId);
         if (!school || !session) throw new ErrorResponse('School or session not found', 404);
 
-        // Include transport monthly fee in printable totals/splits.
-        // If destination is explicitly passed (and not "none"), use that.
-        // If not passed, keep backward compatibility by using first active destination.
+        // Include transport monthly fee only when destination is explicitly selected.
+        // If destination is not provided (or "none"), do not include any transport line.
         let selected: any = null;
         if (transportDestinationId && transportDestinationId !== 'none') {
             const byId = await TransportDestinationRepository.findById(transportDestinationId);
             if (byId && String((byId as any).schoolId) === schoolId) selected = byId;
-        } else if (!transportDestinationId) {
-            const destinations = await TransportDestinationRepository.findBySchool(schoolId);
-            selected = destinations.length > 0 ? destinations[0] : null;
         }
         return await generateFeeStructurePDF({
             school,

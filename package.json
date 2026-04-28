@@ -11,7 +11,8 @@
         "format": "prettier --write \"src/**/*.ts\"",
         "test": "jest --watchAll",
         "seed:load-test": "ts-node --transpile-only src/scripts/seed-load-test-school.ts",
-        "seed:erase-load-test": "ts-node --transpile-only src/scripts/erase-load-test-school.ts"
+        "seed:erase-load-test": "ts-node --transpile-only src/scripts/erase-load-test-school.ts",
+        "seed:school-test-data": "ts-node --transpile-only src/scripts/seed-school-testing-data.ts"
     },
     "keywords": [
         "school",

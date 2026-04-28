@@ -25,6 +25,32 @@ import {
 } from '../utils/feeExemptMonths';
 
 class StudentService {
+    private normalizeTransportFields<T extends Record<string, any>>(payload: T): T {
+        const next: T = { ...payload };
+        const rawUsesTransport = next.usesTransport;
+        const usesTransport =
+            rawUsesTransport === true ||
+            rawUsesTransport === 'true' ||
+            rawUsesTransport === 1 ||
+            rawUsesTransport === '1';
+
+        const rawDestination = next.transportDestinationId;
+        const hasValidDestination = !!(
+            typeof rawDestination === 'string'
+                ? rawDestination.trim()
+                : rawDestination
+        );
+
+        if (!usesTransport || !hasValidDestination) {
+            (next as any).usesTransport = false;
+            (next as any).transportDestinationId = undefined;
+            (next as any).busId = undefined;
+        } else {
+            (next as any).usesTransport = true;
+        }
+        return next;
+    }
+
     private async resolveTransportMonthlyFee(student: any): Promise<number> {
         if (!student?.usesTransport || !student?.transportDestinationId) return 0;
         const destination = await TransportDestinationRepository.findById(
@@ -182,6 +208,7 @@ class StudentService {
      * Create a new student with auto-generated admission number
      */
     async createStudent(schoolId: string, studentData: Partial<IStudent>): Promise<IStudent> {
+        const normalizedStudentData = this.normalizeTransportFields(studentData as any) as Partial<IStudent>;
         const activeSession = await SessionRepository.findActive(schoolId);
         if (!activeSession) {
             throw new ErrorResponse('No active session found. Please create a session first.', 400);
@@ -194,23 +221,23 @@ class StudentService {
 
         // Use manual admission number if provided, otherwise auto-generate
         let admissionNumber: string;
-        if (studentData.admissionNumber && studentData.admissionNumber.trim()) {
-            admissionNumber = studentData.admissionNumber.trim().toUpperCase();
+        if (normalizedStudentData.admissionNumber && normalizedStudentData.admissionNumber.trim()) {
+            admissionNumber = normalizedStudentData.admissionNumber.trim().toUpperCase();
         } else {
             admissionNumber = await this.generateAdmissionNumber(schoolId, school.schoolCode);
         }
 
         // Default password = DOB as DDMMYYYY (e.g. 15082010)
         let defaultPassword = admissionNumber; // fallback
-        if (studentData.dateOfBirth) {
-            const dob = new Date(studentData.dateOfBirth);
+        if (normalizedStudentData.dateOfBirth) {
+            const dob = new Date(normalizedStudentData.dateOfBirth);
             const dd = String(dob.getDate()).padStart(2, '0');
             const mm = String(dob.getMonth() + 1).padStart(2, '0');
             const yyyy = dob.getFullYear();
             defaultPassword = `${dd}${mm}${yyyy}`;
         }
 
-        const namePart = normalizeFirstNameForUsername(studentData.firstName || '');
+        const namePart = normalizeFirstNameForUsername(normalizedStudentData.firstName || '');
         if (!namePart) {
             throw new ErrorResponse(
                 'First name must contain at least one letter or number for username generation',
@@ -218,7 +245,7 @@ class StudentService {
             );
         }
 
-        const phoneDigits = (studentData.phone || '').replace(/\D/g, '');
+        const phoneDigits = (normalizedStudentData.phone || '').replace(/\D/g, '');
         if (phoneDigits.length === 0) {
             throw new ErrorResponse(
                 'Phone number must contain at least one digit (used for login username)',
@@ -227,8 +254,8 @@ class StudentService {
         }
 
         const baseUsername = buildStudentUsernameBase(
-            studentData.firstName || '',
-            studentData.phone,
+            normalizedStudentData.firstName || '',
+            normalizedStudentData.phone,
             admissionNumber
         );
 
@@ -237,7 +264,7 @@ class StudentService {
             const username = await ensureUniqueStudentUsername(baseUsername);
             try {
                 const student = await StudentRepository.create({
-                    ...studentData,
+                    ...normalizedStudentData,
                     schoolId: school._id,
                     sessionId: activeSession._id,
                     admissionNumber,
@@ -382,13 +409,14 @@ class StudentService {
      * Update student
      */
     async updateStudent(schoolId: string, id: string, data: Partial<IStudent>): Promise<IStudent> {
+        const normalizedData = this.normalizeTransportFields(data as any) as Partial<IStudent>;
         const filter = getTenantFilter(schoolId, { _id: id });
         const student = await StudentRepository.findOne(filter);
         if (!student) {
             throw new ErrorResponse('Student not found', 404);
         }
 
-        const updatedStudent = await StudentRepository.update(id, data);
+        const updatedStudent = await StudentRepository.update(id, normalizedData);
         if (!updatedStudent) {
             throw new ErrorResponse('Student not found', 404);
         }
@@ -400,7 +428,7 @@ class StudentService {
             'transportDestinationId',
             'concessionAmount',
             'concessionPercent',
-        ].some((k) => Object.prototype.hasOwnProperty.call(data, k));
+        ].some((k) => Object.prototype.hasOwnProperty.call(normalizedData, k));
 
         if (feeFieldsChanged && updatedStudent.class) {
             const activeSession = await SessionRepository.findActive(schoolId);
