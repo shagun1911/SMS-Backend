@@ -28,6 +28,7 @@ import staffAttendanceRoutes from './staffAttendance.routes';
 import studentNotificationRoutes from './studentNotification.routes';
 import transportAttendanceRoutes from './transportAttendance.routes';
 import admissionEnquiryRoutes from './admissionEnquiry.routes';
+import testPaperRoutes from './testPaper.routes';
 
 const router = Router();
 
@@ -55,6 +56,7 @@ router.use('/transport-attendance', transportAttendanceRoutes);
 router.use('/student-notifications', studentNotificationRoutes);
 router.use('/timetable', timetableRoutes);
 router.use('/admission-enquiries', admissionEnquiryRoutes);
+router.use('/test-papers', testPaperRoutes);
 
 router.use('/ai', aiRoutes);
 router.use('/payments', paymentRoutes);

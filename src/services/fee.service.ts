@@ -92,9 +92,9 @@ class FeeService {
             feeStructure.components && feeStructure.components.length > 0
                 ? feeStructure.components
                 : (feeStructure.fees || []).map((f: any) => ({
-                      amount: f.amount,
-                      type: f.type,
-                  }));
+                    amount: f.amount,
+                    type: f.type,
+                }));
         let monthlyTotal = 0;
         for (const item of rawItems) {
             if (!item || typeof item.amount !== 'number') continue;
@@ -134,10 +134,10 @@ class FeeService {
             (structure as any).components && (structure as any).components.length > 0
                 ? (structure as any).components
                 : ((structure as any).fees || []).map((f: any) => ({
-                      title: f.title,
-                      amount: f.amount,
-                      type: f.type,
-                  }));
+                    title: f.title,
+                    amount: f.amount,
+                    type: f.type,
+                }));
 
         const regularMonthlyItems = rawItems.filter((x: any) => (x.type || '').toString().toLowerCase() === 'monthly');
         const oneTimeItems = rawItems.filter((x: any) => {
@@ -430,9 +430,9 @@ class FeeService {
                     (cachedFeeStructure as any).components && (cachedFeeStructure as any).components.length > 0
                         ? (cachedFeeStructure as any).components
                         : ((cachedFeeStructure as any).fees || []).map((f: any) => ({
-                              amount: f.amount,
-                              type: f.type,
-                          }));
+                            amount: f.amount,
+                            type: f.type,
+                        }));
                 let monthlyTotal = 0;
                 let oneTimeTotal = 0;
                 for (const item of rawItems) {
@@ -557,10 +557,10 @@ class FeeService {
                     feeStructureForReceipt.components && feeStructureForReceipt.components.length > 0
                         ? feeStructureForReceipt.components
                         : (feeStructureForReceipt.fees || []).map((f: any) => ({
-                              name: f.title || f.name,
-                              amount: f.amount,
-                              type: f.type,
-                          }));
+                            name: f.title || f.name,
+                            amount: f.amount,
+                            type: f.type,
+                        }));
                 feeComponents = items.map((c: any) => ({
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * regularMult,
@@ -680,9 +680,9 @@ class FeeService {
                         (structure as any).components && (structure as any).components.length > 0
                             ? (structure as any).components
                             : ((structure as any).fees || []).map((f: any) => ({
-                                  amount: f.amount,
-                                  type: f.type,
-                              }));
+                                amount: f.amount,
+                                type: f.type,
+                            }));
                     let monthlyTotal = 0;
                     let oneTimeTotal = 0;
                     for (const item of rawItems) {
@@ -768,8 +768,8 @@ class FeeService {
                             ? (structure.totalAmount ??
                                 structure.totalAnnualFee ??
                                 monthlyTotal *
-                                    canonicalTotals.multiplier +
-                                    oneTimeTotal)
+                                canonicalTotals.multiplier +
+                                oneTimeTotal)
                             : totalFeeAfterConcession;
                         const targetPaid = totalFromStudent === 0 && totalFeeAfterConcession <= 0
                             ? Number((student as any).paidAmount) || 0
@@ -863,10 +863,10 @@ class FeeService {
                 const rawItems = ((feeStructureForReceipt.components ?? []).length > 0)
                     ? (feeStructureForReceipt.components ?? [])
                     : (feeStructureForReceipt.fees || []).map((f: any) => ({
-                          name: f.title || f.name,
-                          amount: f.amount,
-                          type: f.type,
-                      }));
+                        name: f.title || f.name,
+                        amount: f.amount,
+                        type: f.type,
+                    }));
                 feeComponents = rawItems.map((c: any) => ({
                     name: c.name,
                     amount: c.type === 'one-time' ? c.amount : c.amount * regularMult,
@@ -1299,9 +1299,9 @@ class FeeService {
                     (structure as any).components && (structure as any).components.length > 0
                         ? (structure as any).components
                         : ((structure as any).fees || []).map((f: any) => ({
-                              amount: f.amount,
-                              type: f.type,
-                          }));
+                            amount: f.amount,
+                            type: f.type,
+                        }));
 
                 let monthlyTotal = 0;
                 let oneTimeTotal = 0;
@@ -1882,10 +1882,12 @@ class FeeService {
             // Use aggregation pipeline instead of loading all payments into memory
             FeePayment.aggregate([
                 { $match: { schoolId: schoolObjId } },
-                { $group: {
-                    _id: { $dateToString: { format: '%Y-%m', date: '$paymentDate' } },
-                    amount: { $sum: '$amountPaid' },
-                }},
+                {
+                    $group: {
+                        _id: { $dateToString: { format: '%Y-%m', date: '$paymentDate' } },
+                        amount: { $sum: '$amountPaid' },
+                    }
+                },
                 { $sort: { _id: 1 } },
                 { $project: { _id: 0, month: '$_id', amount: 1 } },
             ]).then((results: any[]) => results.slice(-12)),
@@ -2021,12 +2023,12 @@ class FeeService {
         const totalExpected = validFees.reduce((sum, f: any) => {
             const paymentsBeforeMonth = Array.isArray(f.payments)
                 ? f.payments.reduce((inner: number, p: any) => {
-                      const paymentDate = p?.paymentDate ? new Date(p.paymentDate) : null;
-                      if (!paymentDate || Number.isNaN(paymentDate.getTime()) || paymentDate >= monthStart) {
-                          return inner;
-                      }
-                      return inner + (Number(p.amount) || 0);
-                  }, 0)
+                    const paymentDate = p?.paymentDate ? new Date(p.paymentDate) : null;
+                    if (!paymentDate || Number.isNaN(paymentDate.getTime()) || paymentDate >= monthStart) {
+                        return inner;
+                    }
+                    return inner + (Number(p.amount) || 0);
+                }, 0)
                 : 0;
 
             const expectedAtMonthStart = Math.max(0, (Number(f.totalAmount) || 0) - paymentsBeforeMonth);

@@ -12,12 +12,13 @@ export async function generateWithGroq(
 ): Promise<string | null> {
     const apiKey = config.groq?.apiKey;
     if (!apiKey) return null;
-    const model = config.groq?.model || 'llama-3.3-70b-versatile';
+    const configuredModel = config.groq?.model || 'llama-3.3-70b-versatile';
+    const fallbackModels = ['llama-3.3-70b-versatile', 'llama3-70b-8192'];
     const messages: { role: string; content: string }[] = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
     messages.push({ role: 'user', content: prompt });
 
-    try {
+    const callGroq = async (model: string): Promise<{ ok: boolean; status: number; data: any }> => {
         const res = await fetch(GROQ_URL, {
             method: 'POST',
             headers: {
@@ -32,11 +33,25 @@ export async function generateWithGroq(
             }),
         });
         const data = (await res.json()) as any;
-        if (!res.ok) {
-            console.error('[Groq]', res.status, data?.error?.message ?? data);
+        return { ok: res.ok, status: res.status, data };
+    };
+
+    try {
+        let model = configuredModel;
+        let result = await callGroq(model);
+
+        if (!result.ok && result.status === 404) {
+            const firstAvailable = fallbackModels.find((m) => m !== configuredModel) || configuredModel;
+            model = firstAvailable;
+            result = await callGroq(model);
+        }
+
+        if (!result.ok) {
+            console.error('[Groq]', result.status, result.data?.error?.message ?? result.data);
             return null;
         }
-        const text = data?.choices?.[0]?.message?.content;
+
+        const text = result.data?.choices?.[0]?.message?.content;
         if (typeof text === 'string') return text.trim();
         return null;
     } catch (err: any) {
