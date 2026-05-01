@@ -1,7 +1,7 @@
 import config from '../config';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MAX_TOKENS = 1024;
+const MAX_TOKENS = 4096;
 
 /**
  * Call Groq API (fallback when Gemini hits rate limit). Returns response text or null on failure.

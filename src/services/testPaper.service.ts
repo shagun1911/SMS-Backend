@@ -334,27 +334,38 @@ async function _callGeminiInternal(prompt: string, maxTokens: number): Promise<s
             const is404 = status === 404 || /not found|not supported/i.test(msg);
             if (is404) continue; // try next model
             
-            // For other errors (quota, timeout, etc), we've marked failure and cooldown.
-            // We can 'continue' to try next model with a DIFFERENT key (getActiveKey is called inside loop)
+            // Network/Transport errors (Error fetching...) are often persistent in certain environments (like Render).
+            // If we hit this, we fail this specific model call and let the next one try.
+            // However, we mark the key so it's not reused immediately.
             continue; 
         }
     }
     return null;
 }
 
-async function callGeminiForPaper(
+async function callLLMForPaper(
     prompt: string, 
     maxTokens: number, 
     ctx: PipelineContext
 ): Promise<{ text: string | null; provider: "gemini" | "groq" }> {
-    const result = await callLLMWithRetry(() => _callGeminiInternal(prompt, maxTokens), ctx);
-    if (!result) {
-        console.warn("[TP] Gemini failed → trying fallback (Groq)");
-        ctx.usedGroq = true;
-        const groqText = await generateWithGroq(prompt, "You are a professional exam paper generator. Return valid JSON only.");
-        return { text: groqText, provider: "groq" };
+    // ─── Phase 1: Try Groq First (Primary) ───
+    try {
+        const groqText = await generateWithGroq(prompt, "You are a professional academic examiner. Return valid JSON only.");
+        if (groqText && groqText.length > 50) {
+            return { text: groqText, provider: "groq" };
+        }
+        console.warn("[TP] Groq failed or returned empty → falling back to Gemini");
+    } catch (err: any) {
+        console.warn("[TP] Groq error:", err?.message || "Unknown error", "→ falling back to Gemini");
     }
-    return { text: result, provider: "gemini" };
+
+    // ─── Phase 2: Try Gemini Pool (Fallback) ───
+    const geminiResult = await callLLMWithRetry(() => _callGeminiInternal(prompt, maxTokens), ctx, 2);
+    if (geminiResult) {
+        return { text: geminiResult, provider: "gemini" };
+    }
+
+    return { text: null, provider: "gemini" };
 }
 
 // ─── Safe JSON extraction + line-based fallback ─────────────────────────────────
@@ -764,7 +775,7 @@ async function generateBucket(
 
         console.log(`[TP] bucket=${bucket.difficulty}+${bucket.type} attempt=${attempt + 1} needed=${needed} maxTokens=${maxTokens} relaxed=${relaxed}`);
 
-        const res = await callGeminiForPaper(prompt, maxTokens, ctx);
+        const res = await callLLMForPaper(prompt, maxTokens, ctx);
         if (!res.text) { console.warn(`[TP] no response for ${bucket.difficulty}+${bucket.type} attempt ${attempt + 1}`); continue; }
 
         const arr = extractJsonArray(res.text, bucket.type, bucket.difficulty);
@@ -930,7 +941,7 @@ Return ONLY valid JSON:
 Generate up to ${missing} questions now:`.trim();
 
     const maxTokens = Math.min(2500, Math.max(500, missing * 500));
-    const res = await callGeminiForPaper(prompt, maxTokens, ctx);
+    const res = await callLLMForPaper(prompt, maxTokens, ctx);
     if (!res.text) return [];
     const arr = extractJsonArray(res.text, 'objective', 'medium');
     if (!arr) return [];
@@ -1148,7 +1159,7 @@ export async function generateTestPaper(input: GenerateTestPaperInput): Promise<
     if (llmQuestions.length === 0 && llmTarget > 0) {
         console.error("[TP] LLM_STALLED — triggering emergency fallback");
         const fallbackPrompt = `Generate 5 physics questions on ${input.subject} in JSON. Provide actual options.`;
-        const fallbackRaw = await callGeminiForPaper(fallbackPrompt, 1000, ctx);
+        const fallbackRaw = await callLLMForPaper(fallbackPrompt, 1000, ctx);
         if (fallbackRaw.text) {
             const fallbackArr = extractJsonArray(fallbackRaw.text, 'objective', 'easy', [], []);
             if (fallbackArr && fallbackArr.length > 0) {
