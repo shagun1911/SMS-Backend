@@ -611,12 +611,6 @@ class FeeService {
             concessionAnnualDisplay,
         });
 
-        const receiptsDir = path.join(process.cwd(), 'receipts');
-        if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
-        const pdfPath = path.join(receiptsDir, `${payment.receiptNumber.replace(/\//g, '-')}.pdf`);
-        fs.writeFileSync(pdfPath, pdfBuffer);
-        await FeePaymentRepository.update(payment._id.toString(), { pdfPath } as any);
-
         this.invalidateFeeCachesForSchool(schoolId);
         return { payment, pdfBuffer };
     }
@@ -1502,11 +1496,6 @@ class FeeService {
                 feeMonth,
                 concessionAnnualDisplay,
             });
-            const receiptsDir = path.join(process.cwd(), 'receipts');
-            if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
-            const pdfPath = path.join(receiptsDir, `${payment.receiptNumber.replace(/\//g, '-')}.pdf`);
-            fs.writeFileSync(pdfPath, pdfBuffer);
-            await FeePaymentRepository.update(payment._id.toString(), { pdfPath } as any);
         }
         return payment;
     }
