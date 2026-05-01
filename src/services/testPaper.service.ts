@@ -233,8 +233,8 @@ function isAuthError(err: any): boolean {
 function markKeyFailure(key: GeminiKey, error: any) {
     key.lastFailureAt = Date.now();
     if (isQuotaError(error)) {
-        key.cooldownUntil = Date.now() + 60_000; // 1 min cooldown
-        console.warn(`[TP] key_index=${key.index} quota_exceeded → 1m cooldown`);
+        key.cooldownUntil = Date.now() + 120_000; // 2 min cooldown
+        console.warn(`[TP] key_index=${key.index} quota_exceeded → 2m cooldown`);
     } else if (isAuthError(error)) {
         key.cooldownUntil = Date.now() + 10 * 60_000; // 10 min cooldown
         console.error(`[TP] key_index=${key.index} auth_error → 10m cooldown`);
@@ -253,9 +253,8 @@ function getActiveKey(): GeminiKey | null {
 }
 
 const TP_MODELS = [
-    config.gemini?.model ?? 'gemini-2.0-flash',
-    'gemini-2.0-flash',
     'gemini-1.5-flash',
+    'gemini-2.0-flash',
     'gemini-1.5-flash-8b',
 ];
 
@@ -306,7 +305,7 @@ async function _callGeminiInternal(prompt: string, maxTokens: number): Promise<s
             });
             const llmCall = model.generateContent(prompt);
             const timeout = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("LLM_TIMEOUT")), 10000)
+                setTimeout(() => reject(new Error("LLM_TIMEOUT")), 60000)
             );
             const result = await Promise.race([llmCall, timeout]);
             
@@ -748,7 +747,7 @@ async function generateBucket(
     }
     const TOKENS_PER_Q = 500;
     const TOKENS_PER_Q_RETRY = 400;
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 3;
     const collected: GeneratedQuestion[] = [];
     // Small buckets get relaxed filtering to avoid total failure
     const relaxed = skipDifficultyFilter || bucket.count <= 2;
@@ -1072,7 +1071,7 @@ export async function generateTestPaper(input: GenerateTestPaperInput): Promise<
         };
     }
     const t0 = Date.now();
-    const TOTAL_BUDGET_MS = 45000; // Increased to 45s for 20q papers
+    const TOTAL_BUDGET_MS = 90000; // Increased to 90s to ensure higher success rate
 
     // Request hash for observability
     const requestHash = normalizedHash(
@@ -1105,8 +1104,12 @@ export async function generateTestPaper(input: GenerateTestPaperInput): Promise<
 
     // ── STAGE A: Quality First (60% target) ───────────────────────────────────
     const stage1Results = await runWithLimit(
-        stage1Buckets.map((b) => () => generateBucket(b, input, seen, ctx, topicGroups, phrases)),
-        3
+        stage1Buckets.map((b) => async () => {
+            const res = await generateBucket(b, input, seen, ctx, topicGroups, phrases);
+            await new Promise(r => setTimeout(r, 500)); // Small pause to respect RPM
+            return res;
+        }),
+        1 // Sequential is safer for free tier quotas
     );
 
     let llmQuestions: GeneratedQuestion[] = stage1Results.flat();
