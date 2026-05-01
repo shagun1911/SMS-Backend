@@ -13,8 +13,6 @@ import Student from '../models/student.model';
 import { getTenantFilter } from '../utils/tenant';
 import { generateFeeStructurePDF } from './pdfFeeStructure.service';
 import { generateReceiptPDF } from './pdfReceipt.service';
-import path from 'path';
-import fs from 'fs';
 import {
     getSessionYearMonths,
     normalizeFeeExemptMonths,
@@ -1277,7 +1275,6 @@ class FeeService {
         let totalYearly = student.totalYearlyFee ?? 0;
         let firstMonthFee = 0;
         let oneTimeTotalFromStructure = 0;
-        let structureForReceipt: any = null;
 
         // Derive yearly + first-month fee from fee structure when possible
         if (student.class) {
@@ -1286,7 +1283,6 @@ class FeeService {
                 session._id.toString(),
                 student.class
             );
-            structureForReceipt = structure;
             if (structure) {
                 // Prefer new components model (with type 'monthly' | 'one-time')
                 const rawItems: Array<{ amount: number; type?: string }> =
@@ -1456,47 +1452,7 @@ class FeeService {
             // Ledger allocation should not block admission if something goes wrong.
         }
 
-        const school = await SchoolRepository.findById(schoolId);
-        if (school) {
-            // Resolve receipt month from StudentFee ledger rows for this receiptNumber.
-            let feeMonth: string | undefined = undefined;
-            try {
-                const feeDoc = await StudentFee.findOne({
-                    schoolId: new Types.ObjectId(schoolId),
-                    studentId: payment.studentId,
-                    sessionId: session._id,
-                    'payments.receiptNumber': payment.receiptNumber,
-                }).sort({ dueDate: -1 }).lean();
-                feeMonth = feeDoc?.month ? String(feeDoc.month) : undefined;
-            } catch (_) {
-                // ignore and fallback
-            }
 
-            const concessionAnnualDisplay = this.concessionAnnualDisplayForReceipt(
-                { ...student, concessionAmount: flatConcession, concessionPercent: pctConcession },
-                structureForReceipt,
-                session
-            );
-            const pdfBuffer = await generateReceiptPDF({
-                school,
-                payment,
-                student: {
-                    ...student,
-                    totalYearlyFee: totalYearly,
-                    paidAmount: initialAmount,
-                    dueAmount: remainingDue,
-                    concessionAmount: flatConcession,
-                    concessionPercent: pctConcession,
-                },
-                totalAnnualFee: totalYearly,
-                previousPaid: 0,
-                thisPayment: initialAmount,
-                remainingDue,
-                sessionYear: session.sessionYear,
-                feeMonth,
-                concessionAnnualDisplay,
-            });
-        }
         return payment;
     }
 

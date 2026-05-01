@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { google, Auth } from 'googleapis';
 
 const SCOPES = ['https://www.googleapis.com/auth/gmail.send'];
 
@@ -19,7 +19,7 @@ export function getAuthUrl(): string {
     return oAuth2.generateAuthUrl({ access_type: 'offline', scope: SCOPES, prompt: 'consent' });
 }
 
-export async function getTokensFromCode(code: string) {
+export async function getTokensFromCode(code: string): Promise<Auth.Credentials> {
     const oAuth2 = getOAuthClient();
     const { tokens } = await oAuth2.getToken(code);
     return tokens;
