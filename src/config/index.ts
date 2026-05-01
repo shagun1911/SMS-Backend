@@ -122,7 +122,7 @@ const config: IConfig = {
         windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
         maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
     },
-    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '25000', 10),
+    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '120000', 10),
     upload: {
         maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10),
     },

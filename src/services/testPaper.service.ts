@@ -222,7 +222,8 @@ function initGeminiPool() {
 
 function isQuotaError(err: any): boolean {
     const msg = String(err?.message ?? err).toLowerCase();
-    return err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("rate limit");
+    // Transport-level errors (Error fetching...) are often hidden rate limits or network congestion
+    return err?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("error fetching");
 }
 
 function isAuthError(err: any): boolean {
@@ -234,12 +235,13 @@ function markKeyFailure(key: GeminiKey, error: any) {
     key.lastFailureAt = Date.now();
     if (isQuotaError(error)) {
         key.cooldownUntil = Date.now() + 120_000; // 2 min cooldown
-        console.warn(`[TP] key_index=${key.index} quota_exceeded → 2m cooldown`);
+        console.warn(`[TP] key_index=${key.index} quota_exceeded (or network error) → 2m cooldown`);
     } else if (isAuthError(error)) {
         key.cooldownUntil = Date.now() + 10 * 60_000; // 10 min cooldown
         console.error(`[TP] key_index=${key.index} auth_error → 10m cooldown`);
     } else {
-        key.cooldownUntil = Date.now() + 10_000; // 10s short cooldown for other errors
+        key.cooldownUntil = Date.now() + 60_000; // 1 min cooldown for unknown errors
+        console.warn(`[TP] key_index=${key.index} unknown_error → 1m cooldown`);
     }
 }
 
