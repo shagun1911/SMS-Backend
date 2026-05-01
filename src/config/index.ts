@@ -40,6 +40,7 @@ interface IConfig {
     };
     gemini: {
         apiKey: string;
+        apiKeys: string[];
         model: string;
     };
     groq: {
@@ -125,10 +126,19 @@ const config: IConfig = {
     upload: {
         maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10),
     },
-    gemini: {
-        apiKey: process.env.GEMINI_API_KEY || '',
-        model: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
-    },
+    gemini: (() => {
+        const apiKeys: string[] = [];
+        if (process.env.GEMINI_API_KEY) apiKeys.push(process.env.GEMINI_API_KEY);
+        for (let i = 2; i <= 5; i++) {
+            const key = process.env[`GEMINI_API_KEY_${i}`];
+            if (key) apiKeys.push(key);
+        }
+        return {
+            apiKey: apiKeys[0] || '',
+            apiKeys,
+            model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+        };
+    })(),
     groq: {
         apiKey: process.env.GROQ_API_KEY || '',
         model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
